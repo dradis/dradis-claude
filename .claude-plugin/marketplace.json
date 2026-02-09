@@ -11,8 +11,8 @@
   },
   "plugins": [
     {
-      "name": "dradis-skills",
-      "source": ".",
+      "name": "dradis-core",
+      "source": "./plugins/dradis-core",
       "description": "Core Dradis Framework skills: methodology builder and more",
       "version": "0.0.1",
       "author": {
