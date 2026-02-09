@@ -1,0 +1,13 @@
+{
+  "name": "dradis-skills",
+  "version": "0.0.1",
+  "description": "Dradis Framework skills for Claude Code — core skills for your Dradis instance",
+  "author": {
+    "name": "Dradis Framework",
+    "url": "https://dradis.com"
+  },
+  "repository": "https://github.com/dradis/dradis-skills",
+  "license": "GPL-2.0",
+  "keywords": ["dradis", "pentest", "methodology", "security"],
+  "skills": "./skills/"
+}

@@ -1,0 +1,23 @@
+{
+  "name": "dradis-skills",
+  "owner": {
+    "name": "Dradis Framework",
+    "url": "https://dradis.com"
+  },
+  "metadata": {
+    "description": "Dradis Framework skills for Claude Code — core skills for your Dradis instance",
+    "version": "0.0.1",
+    "repository": "https://github.com/dradis/dradis-skills"
+  },
+  "plugins": [
+    {
+      "name": "dradis-skills",
+      "source": ".",
+      "description": "Core Dradis Framework skills: methodology builder and more",
+      "version": "0.0.1",
+      "author": {
+        "name": "Dradis Framework"
+      }
+    }
+  ]
+}

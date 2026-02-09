@@ -1,0 +1,60 @@
+<?xml version="1.0"?>
+<board version="2">
+  <id>1</id>
+  <name>The Testing Methodology</name>
+  <list>
+    <id>1</id>
+    <name>To Do</name>
+    <previous_id/>
+    <card>
+      <id>1</id>
+      <name>[Recon and analysis] Map visible content</name>
+      <description><![CDATA[#[Section]#
+Recon and analysis
+
+#[Description]#
+Map visible content
+
+]]></description>
+      <due_date/>
+      <previous_id/>
+      <assignees/>
+      <activities/>
+      <comments/>
+    </card>
+    <card>
+      <id>2</id>
+      <name>[Recon and analysis] Discover hidden &amp; default content</name>
+      <description><![CDATA[#[Section]#
+Recon and analysis
+
+#[Description]#
+Discover hidden & default content
+
+]]></description>
+      <due_date/>
+      <previous_id>1</previous_id>
+      <assignees/>
+      <activities/>
+      <comments/>
+    </card>
+    <card>
+      <id>188</id>
+      <name>[Recon and analysis] Test for debug parameters</name>
+      <description><![CDATA[#[Section]#
+Recon and analysis
+
+#[Description]#
+Test for debug parameters
+
+]]></description>
+      <due_date/>
+      <previous_id>187</previous_id>
+      <assignees/>
+      <activities/>
+      <comments/>
+    </card>
+  </list>
+  <list><id>2</id><name>In Progress</name><previous_id>1</previous_id></list>
+  <list><id>3</id><name>Done</name><previous_id>2</previous_id></list>
+</board>
