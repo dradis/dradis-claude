@@ -1,5 +1,5 @@
 {
-  "name": "dradis-skills",
+  "name": "dradis-core",
   "version": "0.0.1",
   "description": "Dradis Framework skills for Claude Code — core skills for your Dradis instance",
   "author": {

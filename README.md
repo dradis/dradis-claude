@@ -12,14 +12,14 @@ A Claude Code plugin providing skills for [Dradis Framework](https://dradis.com)
 
 ## Available Skills
 
-### `/dradis-skills:methodology`
+### `/dradis-core:methodology`
 
 Build a Dradis methodology XML file by parsing external sources.
 
 **Usage:**
 
 ```
-/dradis-skills:methodology https://owasp.org/Top10/2025/ "OWASP Top 10 - 2025"
+/dradis-core:methodology https://owasp.org/Top10/2025/ "OWASP Top 10 - 2025"
 ```
 
 The skill will:
