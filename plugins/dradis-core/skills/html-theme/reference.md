@@ -50,15 +50,63 @@ node.notes       # => Array<Note>
 
 ### Content Blocks (Dradis Pro only)
 
+Content blocks are Pro-only narrative sections (executive summary, methodology, conclusions, appendices, etc.) that live alongside the issue data. Each block belongs to a `block_group` and has a `Type` field used for filtering.
+
 ```ruby
 # Gate behind Pro check
 if defined?(Dradis::Pro)
   content_service.all_content_blocks.each do |cb|
     cb.fields['Title']       # => String
-    cb.fields['Description'] # => String (Textile)
+    cb.fields['Type']        # => String — used to filter/group blocks
+    cb.fields['Description'] # => String (Textile, may contain Liquid)
   end
 end
 ```
+
+**Important:** Content block field values may contain Liquid templates (e.g., `{{ document_properties.dradis.client }}`, `{{ issues.size }}`). These reference project-scoped variables that are available in the export Liquid context, so `markup(block.fields['Description'], liquid: true)` works correctly.
+
+#### Discovering content block types
+
+The `Type` field values come from the project template ZIP (`dradis-repository.xml`). Always discover the actual values — never assume. Extract them from the `<content_block>` elements in the XML.
+
+#### Recommended iteration pattern
+
+Discover the section types from the project template XML (step 1 of the SKILL workflow), then iterate in display order:
+
+```erb
+<% if defined?(Dradis::Pro) %>
+  <%
+    # Populate this list from the <content_block> elements in the project template.
+    # Determine display order from the block titles or numbering.
+    # Each kit will have different types — never assume.
+    pro_section_types = [...] # e.g., discovered from the XML
+  %>
+  <% pro_section_types.each do |section_type| %>
+    <% section_blocks = content_service.all_content_blocks.select { |b| b.fields['Type'] == section_type } %>
+    <% next if section_blocks.empty? %>
+    <section id="pro-<%= section_type.downcase.gsub(' ', '-') %>">
+      <% section_blocks.each do |block| %>
+        <h2><%= markup(block.fields['Title'], liquid: true) %></h2>
+        <%= markup(block.fields['Description'], liquid: true) %>
+      <% end %>
+    </section>
+  <% end %>
+<% end %>
+```
+
+**Notes:**
+- When multiple blocks share the same `Type` (common for appendices), each renders with its own title.
+- Some blocks may have kit-specific fields beyond `Title`, `Type`, and `Description` — always check.
+
+#### Common content block fields
+
+| Field | Description |
+|-------|-------------|
+| `Title` | Section/block heading (may contain Liquid) |
+| `Type` | Category — used for filtering (e.g., `Document Control`, `Recommendations`, `Appendix`) |
+| `Description` | Main body content (Textile + Liquid) |
+
+Some blocks may have additional fields depending on the kit (e.g., `Scope Type`, `Testing Approach`, `Environment` for engagement overview blocks).
 
 ## Helper Methods
 
@@ -114,35 +162,47 @@ Very High
 
 ### Liquid Template Fields
 
-Fields whose sample values contain `{% %}` or `{{ }}` are **Liquid templates**. They are processed by the Dradis web UI but arrive as raw Liquid source in the ERB export context.
+Fields whose sample values contain `{% %}` or `{{ }}` are **Liquid templates**. Whether they work with `markup(..., liquid: true)` depends on what variables the Liquid template references.
 
-**You must compute these values in ERB instead.**
+The export engine's `liquid_assigns` (see `dradis-html_export/lib/dradis/plugins/html_export/exporter.rb`) provides **project-scoped** variables:
+- `issues` (array of IssueDrop), `nodes`, `project`, `tags`
+- Pro only: `content_blocks`, `document_properties`
 
-Common Liquid-computed fields:
-- `Risk` — typically computed from `Impact` x `Likelihood`
-- `Risk Score` — numeric version of the above
+There is **no per-issue `issue` variable** in the export Liquid context.
+
+#### Two categories of Liquid fields
+
+**Project-scoped Liquid** — references global variables like `{{ issues.size }}`, `{{ document_properties.dradis.client }}`. These work fine with `markup(..., liquid: true)`. Common in content blocks.
+
+**Per-issue Liquid** — references `issue.fields['Impact']` (singular `issue`). This variable doesn't exist in the export Liquid context, so `markup(issue.fields['Risk'], liquid: true)` will fail or produce wrong output. **You must replicate these in ERB.**
 
 #### Detection method
 
 ```ruby
-# In the project template XML, if a field value contains:
-{% assign ... %}
-{% case ... %}
-{{ ... }}
-# Then it's a Liquid field — do NOT use issue.fields['FieldName'] for it.
+# If a field's Liquid source references per-issue variables:
+{% case issue.fields['Impact'] %}     # ← per-issue, must compute in ERB
+{{ issue.fields['Likelihood'] }}      # ← per-issue, must compute in ERB
+
+# If it references project-scoped variables:
+{{ issues.size }}                     # ← project-scoped, markup(…, liquid: true) works
+{{ document_properties.dradis.client }}  # ← project-scoped, works
 ```
 
 #### ERB computation pattern
 
+Read the Liquid template source in the project XML to understand the computation logic, then replicate it as an ERB helper method. For example, if a `Risk` field computes from `Impact` x `Likelihood`:
+
 ```erb
 <%
-  impact_map     = { 'Very High' => 5, 'High' => 4, 'Moderate' => 3, 'Low' => 2, 'Very Low' => 1 }
-  likelihood_map = { 'Very High' => 5, 'High' => 4, 'Moderate' => 3, 'Low' => 2, 'Very Low' => 1 }
+  # Build lookup maps from the categorical values discovered in step 1
+  impact_map = { 'Very High' => 5, 'High' => 4, ... }
 
+  # Replicate the Liquid logic as a Ruby method
   def compute_risk(impact, likelihood, impact_map, likelihood_map)
     imp = impact_map[impact.to_s.strip] || 0
     lik = likelihood_map[likelihood.to_s.strip] || 0
     score = imp * lik
+    # Thresholds should match whatever the Liquid template defines
     case
     when score >= 20 then 'Critical'
     when score >= 15 then 'High'
@@ -151,14 +211,10 @@ Common Liquid-computed fields:
     else                  'Info'
     end
   end
-
-  def compute_risk_score(impact, likelihood, impact_map, likelihood_map)
-    imp = impact_map[impact.to_s.strip] || 0
-    lik = likelihood_map[likelihood.to_s.strip] || 0
-    imp * lik
-  end
 %>
 ```
+
+The key is to **read and understand** the Liquid source, then replicate its logic. Don't assume a particular formula — different kits may compute risk differently.
 
 ## Categorical Field Patterns
 
@@ -168,92 +224,70 @@ Always extract ALL unique values for categorical fields. Missing a value means c
 
 ```erb
 <%
-  # Collect all unique statuses from actual data
-  all_statuses = issues.map { |i| i.fields['Remediation Status'].to_s.strip }.uniq.reject(&:empty?)
+  # Approach 1: Collect from actual data (defensive — catches any value)
+  all_values = issues.map { |i| i.fields['SomeField'].to_s.strip }.uniq.reject(&:empty?)
 
-  # Or define the known set explicitly (from the project template):
-  statuses = ['Open', 'In Progress', 'Partially Remediated', 'Accepted Risk', 'Remediated']
+  # Approach 2: Define the known set explicitly (from the project template)
+  # Use this when you need a specific display order
+  known_values = ['Value A', 'Value B', 'Value C']
 
   # Count per category
-  status_counts = Hash.new(0)
-  issues.each { |i| status_counts[i.fields['Remediation Status'].to_s.strip] += 1 }
+  counts = Hash.new(0)
+  issues.each { |i| counts[i.fields['SomeField'].to_s.strip] += 1 }
 %>
 ```
 
 ### Color maps
 
-Define a color for every categorical value:
+Define a color for every categorical value. Choose colors that are semantically appropriate (e.g., red for critical/open, green for resolved/low):
 
 ```erb
 <%
-  risk_color = {
-    'Critical' => '#dc3545',
-    'High'     => '#fd7e14',
-    'Moderate' => '#ffc107',
-    'Low'      => '#0dcaf0',
-    'Info'     => '#6c757d'
-  }
-
-  status_colors = {
-    'Open'                  => '#dc3545',
-    'In Progress'           => '#fd7e14',
-    'Partially Remediated'  => '#ffc107',
-    'Accepted Risk'         => '#6c757d',
-    'Remediated'            => '#198754'
+  colors = {
+    'Value A' => '#dc3545',
+    'Value B' => '#ffc107',
+    'Value C' => '#198754'
   }
 %>
 ```
 
 ## Sorting Issues
 
-Sort by computed risk (highest first):
+Sort issues by severity (highest first). The sort key depends on the kit's risk model:
 
 ```erb
 <%
-  risk_order = { 'Critical' => 0, 'High' => 1, 'Moderate' => 2, 'Low' => 3, 'Info' => 4 }
+  # Define a display order for your computed/discovered severity levels
+  severity_order = { 'Critical' => 0, 'High' => 1, 'Moderate' => 2, 'Low' => 3, 'Info' => 4 }
 
   sorted_issues = issues.sort_by { |i|
-    computed = compute_risk(i.fields['Impact'], i.fields['Likelihood'], impact_map, likelihood_map)
-    risk_order[computed] || 99
+    severity_order[compute_severity(i)] || 99
   }
 %>
 ```
 
 ## Risk Heatmap Data
 
-For Impact x Likelihood heatmaps:
+If the kit has two risk dimensions (e.g., Impact x Likelihood), you can build a heatmap matrix. Map each dimension's categorical values to numeric indices, then populate a 2D array:
 
 ```erb
 <%
-  labels = ['Very Low', 'Low', 'Moderate', 'High', 'Very High']
-  heatmap = Array.new(5) { Array.new(5, 0) }
-  heatmap_issues = Array.new(5) { Array.new(5) { [] } }
+  # Dimensions and labels come from the discovered categorical values
+  row_map = { ... }  # e.g., impact values => numeric indices
+  col_map = { ... }  # e.g., likelihood values => numeric indices
+  size = row_map.size
 
+  heatmap = Array.new(size) { Array.new(size, 0) }
   issues.each do |issue|
-    imp = impact_map[issue.fields['Impact'].to_s.strip]
-    lik = likelihood_map[issue.fields['Likelihood'].to_s.strip]
-    next unless imp && lik
-    heatmap[imp - 1][lik - 1] += 1
-    heatmap_issues[imp - 1][lik - 1] << issue.fields['Title']
+    row = row_map[issue.fields['RowField'].to_s.strip]
+    col = col_map[issue.fields['ColField'].to_s.strip]
+    next unless row && col
+    heatmap[row][col] += 1
   end
 %>
 ```
 
-## Heatmap Cell Colors
-
-The color of each heatmap cell is derived from the product of impact and likelihood indices:
-
-```erb
-<%
-  heatmap_colors = [
-    ['#6c757d', '#6c757d', '#0dcaf0', '#0dcaf0', '#ffc107'],  # Impact: Very Low
-    ['#6c757d', '#0dcaf0', '#0dcaf0', '#ffc107', '#ffc107'],  # Impact: Low
-    ['#0dcaf0', '#0dcaf0', '#ffc107', '#fd7e14', '#fd7e14'],  # Impact: Moderate
-    ['#0dcaf0', '#ffc107', '#fd7e14', '#fd7e14', '#dc3545'],  # Impact: High
-    ['#ffc107', '#fd7e14', '#fd7e14', '#dc3545', '#dc3545']   # Impact: Very High
-  ]
-%>
-```
+Cell colors should reflect the product of the two dimensions — low-low is cool/neutral, high-high is red/critical.
 
 ## Passing Data to JavaScript
 
@@ -326,20 +360,16 @@ Examples:
 - `dradis_template-owasp-executive_brief.v1.0.html.erb`
 - `dradis_template-infrastructure-dark_dashboard.v1.0.html.erb`
 
-## OWASP Kit Field Reference
+## Kit-Specific Field Discovery
 
-For the OWASP kit specifically, the issue fields are:
+Every kit has a different field schema. **Never hardcode field names or values** — always discover them from the project template XML as described in step 1 of the SKILL workflow.
 
-| Field | Type | Liquid? | Notes |
-|-------|------|---------|-------|
-| `Title` | Free text | No | Issue title |
-| `OWASP Domain` | Categorical | No | Values: `Web`, `API`, `Mobile` |
-| `OWASP Top 10` | Categorical | No | e.g., `A01:2021 - Broken Access Control` |
-| `Description Short` | Free text | No | Brief description |
-| `Description Long` | Free text (Textile) | No | Detailed description |
-| `Remediation Status` | Categorical | No | Values: `Open`, `In Progress`, `Partially Remediated`, `Accepted Risk`, `Remediated` |
-| `References` | Free text | No | External links |
-| `Impact` | Categorical | No | Values: `Very Low`, `Low`, `Moderate`, `High`, `Very High` |
-| `Likelihood` | Categorical | No | Values: `Very Low`, `Low`, `Moderate`, `High`, `Very High` |
-| `Risk` | Computed | **Yes** | Liquid template — compute from Impact x Likelihood |
-| `Risk Score` | Computed | **Yes** | Liquid template — compute as numeric value |
+When documenting your findings during discovery, classify each field as:
+
+| Classification | Description | Example |
+|----------------|-------------|---------|
+| Free text | Unstructured content, possibly Textile | Title, Description, References |
+| Categorical | Finite set of known values | Impact, Status, Domain |
+| Computed (Liquid) | Contains `{% %}` or `{{ }}` — must be computed in ERB | Risk, Risk Score |
+
+Similarly, content blocks will vary by kit. Discover the `Type` field values, display order, and any kit-specific fields from the `<content_block>` elements in the XML.

@@ -21,22 +21,23 @@ The user will provide:
 
 ### 1. Discover the field schema
 
-Read the kit's project template to discover the actual field names and sample values:
+Read the kit's project data to discover field names and sample values. The data may be stored as:
 
-```
-lib/tasks/templates/{kit}/kit/templates/projects/{kit}-project-template.xml
-```
+- A ZIP file: `lib/tasks/templates/{kit}/kit/{kit}.zip` containing `dradis-repository.xml`
+- Or a plain XML: `lib/tasks/templates/{kit}/kit/templates/projects/*.xml`
 
-If that file doesn't exist, try:
-```
-lib/tasks/templates/{kit}/kit/templates/projects/*.xml
-```
+If it's a ZIP, extract and read the `dradis-repository.xml` entry.
 
-Parse the `<issue>` and `<evidence>` blocks. Each field is marked with `#[FieldName]#`. Extract:
+Parse the XML for `<issue>`, `<evidence>`, and `<content_block>` elements. Each uses `#[FieldName]#` markers. Extract:
 - All field names (e.g., `Title`, `Risk`, `Impact`, `Description Short`)
 - Sample values for each field (to understand the value domain)
 - Which fields are categorical (finite set of values: risk levels, statuses, domains)
 - Which fields are free text (descriptions, references)
+
+Also extract content block metadata:
+- `<block_group>` values (the group each block belongs to)
+- The `Type` field value in each block (used for filtering in Pro templates)
+- The display order (inferred from the block numbering/titles)
 
 ### 2. Detect Liquid template fields
 
@@ -46,11 +47,15 @@ Parse the `<issue>` and `<evidence>` blocks. Each field is marked with `#[FieldN
 {% assign impact_value = 0 %}{% case issue.fields['Impact'] %}{% when "Very High" %}...
 ```
 
-These fields will NOT have usable values at export time — the Liquid engine processes them for the web UI, but the ERB export template receives the raw Liquid source. You **must compute these values in ERB** instead of reading them from the issue fields.
+These fields will NOT render correctly in the export context. Here's why:
 
-**How to detect:** Look for `{% %}` or `{{ }}` syntax in the field's sample value in the project template XML.
+The export engine's `liquid_assigns` provides **project-scoped** variables (`issues`, `nodes`, `project`, `tags`, `document_properties`), but **no per-issue `issue` variable**. So when a Liquid field references `issue.fields['Impact']`, that `issue` variable doesn't exist in the export Liquid context — `markup(issue.fields['Risk'], liquid: true)` will fail or produce wrong output.
 
-**How to handle:** Write ERB helper methods at the top of the template that compute the equivalent value from the input fields. For example, if `Risk` is computed from `Impact` x `Likelihood`, write a `compute_risk(impact, likelihood)` method in ERB.
+This is different from content blocks, which reference project-scoped variables like `{{ issues.size }}` and `{{ document_properties.dradis.client }}` — those work fine with `markup(..., liquid: true)`.
+
+**How to detect:** Look for `{% %}` or `{{ }}` syntax in the field's sample value in the project template XML. If the Liquid references `issue.fields[...]` (singular), it's per-issue and must be computed in ERB.
+
+**How to handle:** Write ERB helper methods at the top of the template that replicate the Liquid logic in Ruby. Read the Liquid source to understand the computation, then translate it.
 
 ### 3. Catalog categorical values
 
@@ -121,20 +126,37 @@ Content rendering:
 
 #### Pro/CE gating
 
-Include a conditional block for Dradis Pro content blocks:
+Include a conditional block for Dradis Pro content blocks. Content blocks are Pro-only narrative sections (executive summary, methodology, appendices, etc.) that live alongside issue data. Each block has a `Type` field used for filtering/grouping.
+
+**You must discover the actual content block types from the project template** (step 1). Different kits will have completely different section types. Some kits may have a single type that appears multiple times (e.g., appendices), others may have unique types for each section.
+
+The general pattern:
 
 ```erb
 <% if defined?(Dradis::Pro) %>
-  <% content_service.all_content_blocks.each do |content_block| %>
-    <div class="content-block">
-      <h2><%= content_block.fields['Title'] %></h2>
-      <%= markup(content_block.fields['Description']) %>
-    </div>
+  <%
+    # Build an ordered list of section types from what was discovered in step 1.
+    # Determine the order from the block titles or numbering in the template data.
+    pro_section_types = [...] # discovered types, in display order
+  %>
+  <% pro_section_types.each do |section_type| %>
+    <% section_blocks = content_service.all_content_blocks.select { |b| b.fields['Type'] == section_type } %>
+    <% next if section_blocks.empty? %>
+    <section>
+      <% section_blocks.each do |block| %>
+        <h2><%= markup(block.fields['Title'], liquid: true) %></h2>
+        <%= markup(block.fields['Description'], liquid: true) %>
+      <% end %>
+    </section>
   <% end %>
 <% end %>
 ```
 
-Place this where it makes sense (e.g., after the executive summary for methodology blocks, or in an appendix).
+**Key points:**
+- Always render with `markup(..., liquid: true)` — content block fields may contain Liquid templates (e.g., `{{ document_properties.dradis.client }}`, `{{ issues.size }}`).
+- Filter on `block.fields['Type']`, not the `block_group` XML attribute.
+- When multiple blocks share the same type (e.g., appendices), render each with its own title.
+- Blocks may have additional kit-specific fields beyond `Title`, `Type`, and `Description` — check the project template.
 
 #### JavaScript
 
@@ -187,30 +209,24 @@ Every template should start with a `<% ... %>` block that:
 Example pattern:
 ```erb
 <%
-  impact_map = { 'Very High' => 5, 'High' => 4, 'Moderate' => 3, 'Low' => 2, 'Very Low' => 1 }
+  # 1. Lookup maps for categorical fields (values discovered from the project template)
+  severity_map = { 'High' => 3, 'Medium' => 2, 'Low' => 1 }
 
-  def compute_risk(impact, likelihood, impact_map, likelihood_map)
-    imp = impact_map[impact.to_s.strip] || 0
-    lik = likelihood_map[likelihood.to_s.strip] || 0
-    score = imp * lik
-    case
-    when score >= 20 then 'Critical'
-    when score >= 15 then 'High'
-    when score >= 8  then 'Moderate'
-    when score >= 3  then 'Low'
-    else                  'Info'
-    end
+  # 2. Helper methods for Liquid-computed fields (logic replicated from the Liquid source)
+  def compute_severity(issue)
+    # ... replicate the Liquid template logic in Ruby
   end
 
-  risk_counts = Hash.new(0)
-  issues.each do |issue|
-    computed_risk = compute_risk(issue.fields['Impact'], ...)
-    risk_counts[computed_risk] += 1
-  end
+  # 3. Aggregate data
+  severity_counts = Hash.new(0)
+  issues.each { |i| severity_counts[compute_severity(i)] += 1 }
+
+  # 4. Color maps
+  severity_colors = { 'High' => '#dc3545', 'Medium' => '#ffc107', 'Low' => '#198754' }
 %>
 ```
 
-**Critical:** Never read `issue.fields['Risk']` or `issue.fields['Risk Score']` directly if those fields contain Liquid templates. Always compute from the source fields.
+**Critical:** Never read a field directly if it contains Liquid templates — the ERB export receives the raw Liquid source, not the computed value. Always compute from the source fields instead.
 
 ## Common Pitfalls
 
