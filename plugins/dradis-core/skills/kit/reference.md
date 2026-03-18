@@ -41,6 +41,7 @@ The ZIP file contains `dradis-repository.xml` and any attachment files (screensh
   <nodes>...</nodes>
   <issues>...</issues>
   <tags>...</tags>
+  <methodologies>...</methodologies>
   <categories>...</categories>
 </dradis-template>
 ```
@@ -199,6 +200,77 @@ Tags link to issues via `<tagging>` elements inside the `<tag>` block. The `tagg
 ```
 
 Category ID 5 is the standard reporting category. Notes assigned to this category appear in report exports.
+
+### Embedded Methodology Board
+
+The project ZIP should include a `<methodologies>` block containing a methodology board with cards distributed across the three lists to simulate a project in progress. This goes after `<tags>` and before `<categories>`.
+
+```xml
+<methodologies>
+<board version="4">
+  <id>2000</id>
+  <name>Methodology Name</name>
+  <node_id/>
+  <list>
+    <id>2001</id><name>To Do</name><previous_id/>
+    <card>
+      <id>2009</id>
+      <name>Upcoming Phase</name>
+      <description><![CDATA[#[Results]#
+Tester comments
+
+#[Objective]#
+...
+]]></description>
+      <due_date/>
+      <previous_id/>
+    </card>
+    <!-- more To Do cards, each pointing to the previous card in this list -->
+  </list>
+  <list>
+    <id>2002</id><name>In Progress</name><previous_id>2001</previous_id>
+    <card>
+      <id>2006</id>
+      <name>Active Phase</name>
+      <description><![CDATA[#[Results]#
+Brief progress notes referencing what has been done so far.
+
+#[Objective]#
+...
+]]></description>
+      <due_date/>
+      <previous_id/>
+    </card>
+    <!-- more In Progress cards -->
+  </list>
+  <list>
+    <id>2003</id><name>Done</name><previous_id>2002</previous_id>
+    <card>
+      <id>2001</id>
+      <name>Completed Phase</name>
+      <description><![CDATA[#[Results]#
+Realistic findings summary referencing the kit's sample issues and evidence.
+
+#[Objective]#
+...
+]]></description>
+      <due_date/>
+      <previous_id/>
+    </card>
+    <!-- more Done cards -->
+  </list>
+</board>
+</methodologies>
+```
+
+**Key rules:**
+- Each list has its own `<previous_id>` chain — the first card in each list has `<previous_id/>`, subsequent cards point to the previous card in the same list (not across lists).
+- "Done" cards should have `#[Results]#` populated with realistic summaries that reference the kit's sample findings.
+- "In Progress" cards should have brief progress notes.
+- "To Do" cards keep the default `#[Results]#\nTester comments`.
+- Card content (all fields except `#[Results]#`) is identical to the methodology template file.
+
+**Distinction from the template file:** The methodology template (`templates/methodologies/`) has all cards in "To Do" with default results — it's the clean reusable template. The embedded copy in the ZIP shows a project mid-flight.
 
 ## Note Templates
 

@@ -126,6 +126,7 @@ This is the most labour-intensive step. You need to create a `dradis-repository.
 - **Evidence** — per-node evidence for each issue (not every issue needs evidence on every node)
 - **Content blocks** — Pro narrative sections with Liquid templates where appropriate
 - **Node properties** — JSON metadata (IP, services, etc.)
+- **Methodology board** — an embedded copy of the methodology with cards distributed across To Do / In Progress / Done to simulate a project in progress
 
 #### XML structure
 
@@ -266,6 +267,19 @@ Delegate to the `/dradis-core:methodology` skill if there's a published framewor
 The methodology should have 8-15 cards covering the testing phases relevant to the kit's domain.
 
 Save to `templates/methodologies/{framework-name}.v1.0.xml`.
+
+**Important:** The kit produces two copies of the methodology:
+
+1. **Template file** (`templates/methodologies/`) — the reusable template. All cards go in the "To Do" list with `#[Results]#\nTester comments`. This is what users get when they create a new project and select this methodology.
+
+2. **Embedded copy** (inside `dradis-repository.xml`, in a `<methodologies>` block) — a snapshot showing a project in progress. Distribute cards across all three lists to make the sample project feel like a real engagement mid-flight:
+   - **Done** (~40% of cards) — early phases. Replace the default `#[Results]#` with realistic findings summaries that reference the kit's sample data.
+   - **In Progress** (~20%) — currently active phases. Add brief progress notes to `#[Results]#`.
+   - **To Do** (~40%) — remaining phases. Keep the default `#[Results]#\nTester comments`.
+
+   Each list maintains its own `<previous_id>` linked list (first card in each list has empty `<previous_id/>`, subsequent cards chain to the previous card in the same list). Card content (Objective, Key Activities, Tools, etc.) is identical to the template — only the `#[Results]#` field and list assignment change.
+
+   The `<methodologies>` block goes after `<tags>` and before `<categories>` in the XML.
 
 ### 6. Create HTML report templates
 
