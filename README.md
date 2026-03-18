@@ -54,6 +54,26 @@ The skill will:
 **Supports:** Bootstrap 5, Chart.js, Highcharts, Font Awesome via CDN. Vanilla JS preferred.
 
 
+### `/dradis-core:kit`
+
+Create a complete setup kit — sample project data, methodology, field schema, and report templates. The kit appears as an option in the Setup wizard so new users can explore Dradis with realistic, domain-specific content.
+
+**Usage:**
+
+```
+/dradis-core:kit redteam "adversary simulation with MITRE ATT&CK mapping"
+```
+
+The skill will:
+1. Design the field schema (issue fields, evidence fields, content blocks) and present for approval
+2. Create note templates, sample project data (XML + ZIP), and node/evidence structure
+3. Delegate to `/dradis-core:methodology` and `/dradis-core:html-theme` for methodology and report templates
+4. Register the kit in the controller and Setup wizard view
+5. Deploy for immediate testing
+
+**Produces:** A complete kit under `lib/tasks/templates/{kit}/` ready for the Setup wizard.
+
+
 ## Samples
 
 The `samples/` directory contains reference files:
