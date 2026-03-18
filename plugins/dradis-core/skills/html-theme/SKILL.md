@@ -68,28 +68,28 @@ For categorical fields (e.g., `Remediation Status`, `Impact`, `Likelihood`, `OWA
 
 ### 4. Design the template
 
-Based on the user's description and the discovered schema, design the template structure. A typical report includes:
+**Start from the domain, not from a layout.** The kit's content and purpose should drive the template's structure, visual language, and information hierarchy. Ask:
 
-**Cover / Header:**
-- Report title, date, project name
-- Branding / logo area
+- **What story does this data tell?** A Red Team report tells an attack narrative — sequential, adversarial, showing kill chain progression. An OWASP report is a compliance posture snapshot. An infrastructure report is an asset-centric vulnerability inventory. Each demands a fundamentally different layout.
+- **What would a practitioner in this domain expect?** A SOC analyst expects detection gap analysis front and center. A CISO expects executive risk posture. A pentester expects technical evidence.
+- **What visual language fits the domain?** Don't default to "dark dashboard with metric cards" — that's one approach, not the only one. Consider: clean white report for executive audiences, timeline/narrative layouts for red team, asset-centric tree views for infrastructure, compliance matrices for standards-based assessments.
 
-**Executive Summary:**
-- Total issue count, breakdown by risk severity
-- Key metrics (e.g., % remediated, critical count)
-- 2-3 summary charts (risk distribution, domain breakdown, remediation status)
+**Do not copy the structure of existing templates.** Each template in a kit should look and feel dramatically different from templates in other kits. Review what already exists (in `lib/tasks/templates/*/kit/templates/reports/html_export/`) and deliberately diverge.
 
-**Risk Visualization:**
-- Risk heatmap (Impact vs. Likelihood matrix) — if the kit has both dimensions
-- Or a bar/donut chart for simpler schemas
+**Design elements to decide:**
+- Overall tone: dark/light, technical/executive, dense/airy
+- Layout metaphor: dashboard, document, timeline, narrative, matrix
+- Information hierarchy: what goes first? (varies by audience and domain)
+- Unique visual element: every template should have at least one distinctive visualization that the others don't (e.g., kill chain timeline, risk heatmap, compliance matrix, attack flow diagram)
+- Typography: serif vs. sans, mono for what purpose
+- Color strategy: not just accent color — the overall palette mood
 
-**Detailed Findings:**
-- One section per issue, sorted by risk (highest first)
-- All relevant fields rendered
-- Evidence sub-sections (if the kit uses evidence)
-
-**Appendices (optional):**
-- Methodology notes, scope, references
+**All templates need these sections (but arranged and styled per the domain):**
+- Header with report identification
+- Summary-level metrics
+- Detailed findings with all relevant fields
+- Evidence (if the kit uses it)
+- Pro content blocks section (gated with `defined?(Dradis::Pro)`)
 
 ### 5. Build the ERB template
 
