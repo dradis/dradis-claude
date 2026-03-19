@@ -180,7 +180,7 @@ Section content here...
         <note>
           <id>200</id>
           <author>Tool upload</author>
-          <category-id>5</category-id>
+          <category-id>1</category-id>
           <text><![CDATA[#[Title]#
 Host Details
 
@@ -236,8 +236,8 @@ Detailed description...
   </tags>
   <categories>
     <category>
-      <id>5</id>
-      <name>AdvancedWordExport Ready</name>
+      <id>1</id>
+      <name>Default category</name>
     </category>
   </categories>
 </dradis-template>

@@ -193,13 +193,13 @@ Tags link to issues via `<tagging>` elements inside the `<tag>` block. The `tagg
 ```xml
 <categories>
   <category>
-    <id>5</id>
-    <name>AdvancedWordExport Ready</name>
+    <id>1</id>
+    <name>Default category</name>
   </category>
 </categories>
 ```
 
-Category ID 5 is the standard reporting category. Notes assigned to this category appear in report exports.
+Category ID 1 is the standard note category.
 
 ### Embedded Methodology Board
 
