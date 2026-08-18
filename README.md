@@ -73,6 +73,25 @@ The skill will:
 
 **Produces:** A complete kit under `lib/tasks/templates/{kit}/` ready for the Setup wizard.
 
+### `/dradis-core:calculator`
+
+Create a Dradis risk calculator add-on (a `dradis-calculator_*` gem) by porting an external scoring model — a reference calculator page, a published spec, or a scoring table.
+
+**Usage:**
+
+```
+/dradis-core:calculator https://aivss.owasp.org/ssvc.html aivss-ssvc
+```
+
+The skill will:
+1. Extract the scoring model from the source — formulas, decision tables, thresholds, labels — verbatim
+2. Clone the closest existing calculator (CVSS, DREAD or MITRE) as the skeleton
+3. Build the gem with the model's definitions in a single `V1` class, available at both the instance level and on each issue
+4. Verify the port with a differential test against the reference implementation
+5. Wire the gem into `dradis-ce`'s Gemfile
+
+**Produces:** A new `dradis-calculator_{name}/` sibling directory, ready to mount.
+
 
 ## Samples
 
