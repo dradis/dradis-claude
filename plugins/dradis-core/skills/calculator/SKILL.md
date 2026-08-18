@@ -38,6 +38,12 @@ wrong wastes the rest of the work.
 | publishes a spec **with test vectors or worked examples** | Transcribe | The published vectors |
 | is prose, a table, or a paper only | Transcribe | Hand-derived cases only |
 | is a data feed (taxonomy, control catalogue) | Fetch and transform | Shape and referential checks |
+| is the user's own model (an internal matrix, a spreadsheet, a description) | Transcribe from their description | **The user is the oracle** |
+
+For a bespoke model the user owns, restate the whole model back to them — every
+axis, every band, every label and the exact cell values — and get it confirmed
+before building. That confirmation *is* the specification; without it there is
+nothing to be correct against.
 
 **Prefer vendoring.** If the model's owner publishes working code, copying it
 verbatim removes an entire class of bug: there is no transcription to get
@@ -65,11 +71,25 @@ This decides the UI, the `V1` model, and which sibling to clone.
 | Discrete-option metrics | CVSS, AIVSS-SSVC | Button groups or selects per metric | CVSS / DREAD |
 | Numeric scales | DREAD | Radio rows, or selects for longer scales | DREAD |
 | Hierarchical taxonomy | MITRE ATT&CK | Dependent selects, backed by a data asset | MITRE |
-| Lookup table / macrovector | CVSS v4 | Metrics in, vendored table out | CVSS |
+| Lookup table / matrix | OWASP RR, 5×5 risk matrices | Axes in, cell out; show the cell hit | DREAD |
+| Macrovector | CVSS v4 | Metrics in, vendored table out | CVSS |
+| Decision tree | SSVC, triage trees | Dependent questions; show the path taken | MITRE |
 | Multi-version model | CVSS 3.0/3.1/4.0 | Version menu, one partial set per version | CVSS |
 
 A model may combine these — AIVSS-SSVC is discrete-option inputs plus numeric
 scales plus a decision table. Take the UI for each part from its own row.
+
+Two shape details that are easy to miss and expensive to retrofit:
+
+- **A decision tree is not a formula.** The outcome comes from the path, so
+  later questions depend on earlier answers and the reachable options change as
+  the user answers. Render the questions in order, reveal them as they unlock,
+  and show the path taken alongside the outcome — the path is the justification
+  a reader needs, and it belongs in the output fields too.
+- **"Not defined" is a real value.** Most published models have a skip value
+  with defined semantics — CVSS's `X` appears throughout its metrics and means
+  "use the default weight", not "zero". Model it explicitly and make sure it
+  round-trips; do not collapse it to blank or to the lowest option.
 
 If the model needs an external dataset, follow MITRE: a script under
 `scripts/` fetches and reduces upstream data to a JSON asset that ships with
@@ -90,7 +110,33 @@ Ask these together, then build without further interruption:
 4. **Extras** — which affordances from the reference to carry over. Judge each
    against the existing calculators rather than porting reflexively.
 
-## Step 4 — Build the gem
+## Step 4 — Design the output fields
+
+The fields the calculator writes are a **public interface**, not internal
+bookkeeping. Kits, report templates and issue tables read them by name: the
+`welcome` kit's HTML export does `issue.fields['CVSSv4.BaseScore'].to_f` and
+colour-codes findings by it, and its issue note template lists the field so
+every new issue has the slot.
+
+So design for the consumer:
+
+- **One numeric field** carrying the headline score, written bare so `.to_f`
+  parses it — no units, no suffix, no thousands separator
+- **One human-readable field** carrying the verdict or band, for grouping and
+  for prose
+- **The vector or path**, if the model has one, so a score can be audited and
+  re-imported
+- **The individual metrics**, so a report can explain how the score was reached
+
+Choose the names once and treat them as frozen. Renaming a field silently
+breaks every template that reads it; see "Output fields as an interface" in
+[reference.md](reference.md) for how CVSS carries a legacy name to avoid
+exactly that.
+
+If the calculator is meant to feed a specific kit or report theme, say so —
+`/dradis-core:kit` and `/dradis-core:html-theme` build the consuming side.
+
+## Step 5 — Build the gem
 
 Clone the sibling chosen in Step 2 and strip it: remove its `.git`, `lib/`,
 `app/`, `config/` and `CHANGELOG.md`; keep `.github/`, `.gitignore`,
@@ -102,7 +148,7 @@ it is the single source of truth. Views iterate over it; the JS never restates
 it. Vendored code is the exception: keep it verbatim under a `vendor/`
 directory, unmodified, so it can be re-copied when upstream changes.
 
-## Step 5 — Wire up both levels
+## Step 6 — Wire up both levels
 
 An add-on is not done until it works in both places:
 
@@ -113,38 +159,27 @@ Both partials are discovered automatically by `render_view_hooks` — dradis-ce
 needs no change. Render the same content partials from both entry points so
 the two levels cannot drift.
 
-## Step 6 — Verify, at the strongest tier the source allows
+## Step 7 — Verify, at the strongest tier the source allows
 
 **Do not claim parity you have not measured.** Reading the code back to
-yourself proves nothing. Use the best tier available from Step 1, and state in
-your report which tier you used and what it covered.
+yourself proves nothing.
 
-**Tier 1 — differential against a runnable reference.** Drive the reference
-and your build over the same inputs, compare every output. The strongest
-evidence; use it whenever the source ships something runnable. See
-"Verifying the port" in [reference.md](reference.md).
+Use the best tier Step 1 said was available:
 
-**Tier 2 — published test vectors.** Encode the spec's vectors or worked
-examples as cases and assert your build reproduces each. Weaker than Tier 1
-(vectors are samples, not coverage), so combine with the structural checks
-below.
+1. **Differential** against a runnable reference — the strongest evidence
+2. **Published test vectors** — samples, not coverage
+3. **Hand-derived cases** — when no oracle exists, say so plainly
+4. **User confirmation** — for a bespoke model, their sign-off on the restated
+   model is what you are testing against
 
-**Tier 3 — hand-derived cases.** When the source is prose only: work several
-cases through the model by hand, including every branch and both sides of
-every threshold, and assert against those. Say plainly in your report that no
-oracle existed.
+Then run the structural checks — a programmatic constants check, boundary
+enumeration over each derived quantity, a round-trip through state
+restoration, and agreement between the two levels.
 
-At every tier, also run these — they are cheap and catch different bugs:
+"Verifying the port" in [reference.md](reference.md) has the technique for
+each. **Report the tier, what it covered, and the counts.**
 
-- **Constants check** — assert programmatically that the values in `V1` match
-  the source. Catches a mistyped lookup cell that a formula test never will.
-- **Boundary enumeration** — for each derived quantity, enumerate every
-  distinct value it can take rather than sampling, so no threshold is missed.
-- **Round-trip** — save a score, reload it, assert the form returns to the
-  same state; assert malformed input falls back instead of raising.
-- **Both levels** — the instance page and the issue view must agree.
-
-## Step 7 — Wire into dradis-ce
+## Step 8 — Wire into dradis-ce
 
 Add the gem to the Calculators block in `dradis-ce/Gemfile`. Before the gem is
 published, use a path reference:
@@ -181,3 +216,5 @@ Confirm with the user before editing their `dradis-ce` checkout.
 - [ ] Ruby parses (`ruby -c`), JS parses (`node --check`)
 - [ ] No leftover strings from the calculator you cloned
 - [ ] Any external dataset ships as an asset, with the script that produced it
+- [ ] The headline score field parses with `.to_f` — bare number, no decoration
+- [ ] Any "not defined" value round-trips instead of collapsing to blank

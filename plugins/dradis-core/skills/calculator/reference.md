@@ -179,8 +179,36 @@ these as radio rows with the guidance in the table cells.
 the data lives in a JSON asset (see "External datasets"). `V1` holds only the
 field names the selects write to.
 
-**Lookup table.** Keep the table verbatim, ideally vendored rather than
-retyped; `V1` holds the metric definitions that index into it.
+**Lookup table or matrix.** Keep the table verbatim, ideally vendored rather
+than retyped; `V1` holds the axis definitions that index into it. Expose which
+cell was hit, not just its value — a reader checking a 5×5 matrix wants to see
+the row and column.
+
+**Decision tree.** `V1` holds the nodes: each question, its options, and for
+each option either the next question or a terminal outcome.
+
+```ruby
+NODES = {
+  'exploitation' => {
+    question: '...',
+    options: [
+      { key: 'active', label: 'Active', next: 'automatable' },
+      { key: 'none',   label: 'None',   outcome: 'Defer' }
+    ]
+  }
+}.freeze
+```
+
+The UI reveals questions as they unlock rather than showing all of them, and
+the **path** is part of the result: record it as an output field so a reader
+can audit how the outcome was reached. Restoring state means replaying the
+path, so validate that a saved path is still walkable — a tree revision can
+strand an old one, and it must fall back rather than raise.
+
+**"Not defined" values.** Most published models have a skip value with defined
+semantics (CVSS's `X` means "use the default weight", not zero). Give it a real
+option key, keep it out of the arithmetic the way the source does, and make
+sure it survives a save/reload.
 
 Whatever the shape, a small amount of extra structure pays off: tie each
 control to its options, its labels **and** its issue field(s) in one place, so
@@ -202,6 +230,42 @@ FIELDS = FIELD_NAMES.map { |name| "{PREFIX}.#{name}".freeze }.freeze
 ```
 
 `%i[]` handles dotted names: `%i[Base.Score]` gives `:"Base.Score"`.
+
+## Output fields as an interface
+
+The `{PREFIX}.*` fields are consumed by name outside the calculator — kits,
+HTML export templates and issue tables all read them. The `welcome` kit's
+export template does:
+
+```erb
+<%= markup(issue.fields['CVSSv4.BaseScore'], liquid: true) %>
+```
+
+and colour-codes findings from `issue.fields['CVSSv4.BaseScore'].to_f`, while
+the kit's issue note template lists `#[CVSSv4.BaseScore]#` so every new issue
+carries the slot. That makes the field names a contract:
+
+- Write the headline score **bare** — `7.5`, not `7.5/10` or `High (7.5)` —
+  so `.to_f` parses it
+- Keep the human-readable verdict in its **own** field rather than decorating
+  the number
+- Order `FIELDS` the way a reader wants them: identity and score first,
+  individual metrics after
+
+### Renaming is a breaking change
+
+A field name that has shipped is referenced by templates you cannot see. CVSS
+still reads its own legacy name years later:
+
+```ruby
+field_value_v3 = @issue.fields['CVSSv3.Vector'] || @issue.fields['CVSSv3Vector']
+```
+
+If a name must change, read both and write the new one, exactly as above.
+
+This is also why the model class is `V1`. A revision of the scoring model that
+changes what a field *means* wants a `V2` alongside it, with its own field
+namespace, rather than a redefinition that silently changes historical scores.
 
 ## Vendoring an upstream implementation
 
@@ -397,6 +461,24 @@ in dradis-ce needs editing:
 </li>
 ```
 
+### Other available hooks
+
+`render_view_hooks` is used in more places than the two a calculator normally
+fills. Any of these can be filled by adding a matching partial — no change to
+dradis-ce:
+
+| Hook | Rendered in | Use for a calculator |
+|---|---|---|
+| `tools_menu` | Main nav | The instance-level link (all three use this) |
+| `issues/show-tabs` | Issue view | The calculator tab (all three use this) |
+| `issues/widget` | Issue sidebar | Show the current score without opening the calculator |
+| `issues/show-content` | Issue body | Render the score inline on the issue |
+| `issues/edit-content` | Issue editor | Surface fields while editing |
+| `export/index-tabs` | Export page | Only with `feature: :export` |
+
+The sidebar widget is worth considering: it puts the score in front of a reader
+who is not going to open the calculator, which is most readers.
+
 ## JavaScript
 
 Vanilla ES6 in a `turbo:load` listener, wired by `data-behavior` attributes.
@@ -490,6 +572,14 @@ When the source is prose or a table only, work cases through the model by
 hand: every branch, and both sides of every threshold. Record the derivation
 next to each expected value so a reviewer can check your arithmetic rather
 than trusting it. Say plainly that no oracle existed.
+
+### Tier 4 — user confirmation
+
+For a model the user owns, there is no external oracle: their sign-off on the
+model you restated back to them is the specification. Encode that restatement
+as the test — every axis, band and cell as explicit cases — so the thing they
+approved is the thing that is asserted, and a later change to the model shows
+up as a failing case rather than a quiet drift.
 
 ### Structural checks, at every tier
 
