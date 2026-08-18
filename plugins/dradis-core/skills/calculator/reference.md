@@ -1,13 +1,14 @@
 # Dradis Risk Calculator Reference
 
 Everything a `dradis-calculator_*` add-on needs: the file layout, the
-conventions each file follows, the naming traps, and the differential
-harness that proves the port is faithful.
+conventions each file follows, the naming traps, the patterns for vendored
+code and external datasets, and how to verify the result.
 
-Throughout, `{name}` is the kebab-case calculator name (`aivss-ssvc`),
-`{path}` its underscored form used in file paths and routes (`aivss_ssvc`),
-`{Module}` the Ruby module (`AivssSsvc`), and `{PREFIX}` the issue field
-prefix (`AIVSS-SSVC`).
+Throughout, `{name}` is the kebab-case calculator name; the examples below
+use `aivss-ssvc` to make the substitutions concrete. So `{name}` is
+`aivss-ssvc`, `{path}` its underscored form used in file paths and routes
+(`aivss_ssvc`), `{Module}` the Ruby module (`AivssSsvc`), and `{PREFIX}` the
+issue field prefix (`AIVSS-SSVC`).
 
 ## File layout
 
@@ -155,32 +156,117 @@ is what `simple_form_for [:{path}, current_project, @issue]` resolves to.
 
 ## The model (`V1`)
 
-One class holding every definition taken from the source: input controls and
-their options, derived groupings, defaults, and the issue field list. Views
-iterate over it and the JS never restates any of it.
+One class holding every definition taken from the source. Views iterate over
+it and the JS never restates any of it. Its *shape* follows the model's shape
+— there is no single schema to copy.
+
+**Discrete-option metrics.** A list per metric, each option carrying its key,
+label and numeric value:
 
 ```ruby
-module Dradis::Plugins::Calculators::{Module}
-  class V1
-    # ... option lists taken verbatim from the source ...
-
-    # Ties each control to its options, its labels, and its issue fields, so
-    # the view is pure markup and state restoration can be data-driven.
-    INPUTS = [
-      { id: 'threat', field: '{PREFIX}.Threat', value_field: '{PREFIX}.Threat.Value',
-        label: '...', help: '...', options: THREAT_LEVELS }
-    ].freeze
-
-    # The state the reference implementation loads with.
-    DEFAULTS = { ... }.freeze
-
-    FIELD_NAMES = %i[ ... ].freeze
-    FIELDS = FIELD_NAMES.map { |name| "{PREFIX}.#{name}".freeze }.freeze
-  end
-end
+METRICS = [
+  { key: 'AV', name: 'Attack Vector', options: [
+    { key: 'N', label: 'Network', value: 0.85 },
+    { key: 'A', label: 'Adjacent', value: 0.62 }
+  ] }
+].freeze
 ```
 
-`%i[]` handles dotted names: `%i[Threat.Value]` gives `:"Threat.Value"`.
+**Numeric scales.** The scale bounds and the text for each step; DREAD renders
+these as radio rows with the guidance in the table cells.
+
+**Hierarchical taxonomy.** Little or nothing in `V1` beyond the field list —
+the data lives in a JSON asset (see "External datasets"). `V1` holds only the
+field names the selects write to.
+
+**Lookup table.** Keep the table verbatim, ideally vendored rather than
+retyped; `V1` holds the metric definitions that index into it.
+
+Whatever the shape, a small amount of extra structure pays off: tie each
+control to its options, its labels **and** its issue field(s) in one place, so
+views become pure markup and state restoration can loop rather than repeat
+field names:
+
+```ruby
+INPUTS = [
+  { id: 'severity', field: '{PREFIX}.Severity', label: '...', options: SEVERITY_LEVELS }
+].freeze
+```
+
+Also in `V1`: the state the reference loads with (`DEFAULTS`), and the issue
+field list:
+
+```ruby
+FIELD_NAMES = %i[ ... ].freeze
+FIELDS = FIELD_NAMES.map { |name| "{PREFIX}.#{name}".freeze }.freeze
+```
+
+`%i[]` handles dotted names: `%i[Base.Score]` gives `:"Base.Score"`.
+
+## Vendoring an upstream implementation
+
+When the model's owner publishes working code, prefer copying it over
+transcribing it — there is no transcription to get wrong, and upstream fixes
+become a re-copy rather than a re-read.
+
+CVSS is the worked example. It vendors FIRST's own files unmodified:
+
+```
+app/assets/javascripts/dradis/plugins/calculators/cvss/
+├── v3/vendor/cvsscalc31.js            # upstream scoring
+├── v3/vendor/cvsscalc31_helptext.js   # upstream tooltip text
+├── v3/calculator.js.coffee            # thin wrapper
+└── v4/vendor/{app,cvss_config,cvss_lookup,max_composed,…}.js
+```
+
+The wrapper does three things only: read the form, call upstream, render the
+result. It contains no scoring logic of its own.
+
+Rules for vendored code:
+
+- Keep it **byte-identical** to upstream. Never reformat or "fix" it — that
+  forfeits the whole benefit and makes the next re-copy a merge.
+- Put it under a `vendor/` directory so it is obvious what is not yours.
+- Record the upstream URL and version, so a future update is mechanical.
+- List each file in the asset manifests explicitly, in dependency order.
+- Check the licence permits redistribution before vendoring.
+
+## External datasets
+
+For taxonomy- or catalogue-shaped models, ship the data as an asset rather
+than fetching upstream at runtime. MITRE is the worked example:
+
+```
+scripts/download_mitre_data.rb        # fetches upstream, reduces it, writes the asset
+app/assets/data/…/mitre_data.json     # the reduced asset that ships (~148KB)
+```
+
+The script pulls the full upstream feeds, extracts only the fields the
+calculator needs, and writes a compact JSON file. The JS loads it through the
+asset pipeline:
+
+```js
+const response = await fetch("<%= asset_path('…/mitre_data.json') %>");
+```
+
+which requires the calculator file be named `*.js.erb`. Add the JSON to the
+engine's `assets.precompile` list. Commit both the script and its output —
+the script is how the data gets refreshed, the output is what ships.
+
+## Multi-version models
+
+When the model has versions in active use (CVSS 3.0/3.1/4.0), keep them side
+by side rather than replacing:
+
+- One partial set per version under `base/v3/`, `base/v4/`
+- A `_version_menu.html.erb` select, and a `@version` ivar the controller sets
+  by sniffing which version's fields the issue already carries
+- Separate field namespaces per version (`CVSSv3.*`, `CVSSv4.*`) so an issue
+  scored under one is not misread as the other
+- On update, delete stale fields of the version being replaced
+
+Default a new score to the newest version, but open an existing one on the
+version it was scored with.
 
 ## Restoring saved state
 
@@ -314,8 +400,11 @@ in dradis-ce needs editing:
 ## JavaScript
 
 Vanilla ES6 in a `turbo:load` listener, wired by `data-behavior` attributes.
-Port the source's logic verbatim — same branch order, same comparisons, same
-rounding — and mark it as ported so nobody "improves" it later.
+If you vendored an upstream implementation, this file is a thin wrapper: read
+the form, call upstream, render the result, and hold no scoring logic of its
+own. If you transcribed instead, port the source's logic verbatim — same
+branch order, same comparisons, same rounding — and mark it as ported so
+nobody "improves" it later.
 
 ```js
 document.addEventListener('turbo:load', () => {
@@ -358,19 +447,21 @@ Style against Hera's theme custom properties — `--primary-bg`,
 `--primary-bg-subtle`, `--border-color`, `--text-default`, `--text-muted` —
 so the calculator follows light and dark themes.
 
-## Differential testing
+## Verifying the port
 
-The only evidence that a port is faithful. Run the reference implementation
-and your implementation side by side over the same inputs and compare every
-output.
+Match the technique to what the source affords. State which you used.
 
-For a single-page reference calculator, jsdom can host both:
+### Tier 1 — differential against a runnable reference
+
+The strongest evidence, available whenever the source ships something
+runnable. Run the reference and your build over the same inputs and compare
+every output. For a self-contained reference page, jsdom can host both:
 
 ```js
 const { JSDOM } = require('jsdom');
 
 // Reference: the real page, its own scripts running.
-const webDom = new JSDOM(fs.readFileSync('reference.html', 'utf8'), { runScripts: 'dangerously' });
+const ref = new JSDOM(fs.readFileSync('reference.html', 'utf8'), { runScripts: 'dangerously' });
 
 // Under test: your rendered markup + your real calculator.js.
 const dom = new JSDOM(fs.readFileSync('fixture.html', 'utf8'), { runScripts: 'outside-only' });
@@ -378,31 +469,52 @@ dom.window.eval(fs.readFileSync('.../{path}_calculator.js', 'utf8'));
 dom.window.document.dispatchEvent(new dom.window.Event('turbo:load'));
 ```
 
-Render the fixture from the **real ERB** rather than hand-writing HTML, so
-the test covers the views too. Plain ERB does not auto-escape like Rails, so
-emulate it or attributes containing quotes will differ from what Dradis
+If the reference is a library rather than a page, require it directly and skip
+the DOM on that side. If it is a hosted service, capture its responses once to
+a fixture rather than calling it per assertion.
+
+Render your fixture from the **real ERB** rather than hand-written HTML, so
+the views are covered too. Plain ERB does not auto-escape like Rails does, so
+emulate that or attributes containing quotes will not match what Dradis
 serves.
 
-Coverage that actually finds bugs:
+### Tier 2 — published test vectors
 
-1. Every combination of the discrete inputs, with input vectors chosen to hit
-   each classification branch
-2. Every distinct value any averaged or derived quantity can take — enumerate
-   them rather than sampling, so no threshold boundary is missed
-3. A few thousand random inputs
-4. Every user-visible string, and every element that echoes a value
+Many specs publish vectors or worked examples. Encode each as a case and
+assert your build reproduces it exactly. Vectors are samples rather than
+coverage, so pair them with the structural checks below.
 
-Two cheaper checks worth adding alongside it:
+### Tier 3 — hand-derived cases
 
-- **Constants check**: parse the source page and assert your `V1` constants
-  match it — option values, labels, thresholds, defaults. Catches a typo in a
-  lookup table that a formula test would not.
-- **Round-trip check**: drive the calculator, take its saved field output,
-  feed it back through `selection_from_fields`, and assert the form state is
-  identical. Also assert malformed input falls back rather than raising.
+When the source is prose or a table only, work cases through the model by
+hand: every branch, and both sides of every threshold. Record the derivation
+next to each expected value so a reviewer can check your arithmetic rather
+than trusting it. Say plainly that no oracle existed.
 
-Set the fixture up so one process can be pointed at either layout; the
-instance and issue views must produce identical numbers.
+### Structural checks, at every tier
+
+These are cheap and catch bugs the tiers above miss:
+
+- **Constants check** — parse the source and assert programmatically that the
+  values in `V1` match: option values, labels, thresholds, defaults. Catches a
+  mistyped lookup cell that no formula test will.
+- **Boundary enumeration** — for each derived quantity, enumerate every
+  distinct value it can reach rather than sampling. Averages and lookups have
+  far fewer distinct outputs than inputs, so this is usually cheap and it is
+  the only way to guarantee no threshold boundary is skipped.
+- **Random fuzz** — a few thousand inputs across the whole space.
+- **Round-trip** — drive the calculator, take its saved field output, feed it
+  back through state restoration, assert the form state is identical. Assert
+  malformed and partial input falls back rather than raising.
+- **Both layouts** — point the harness at the instance page and the issue view
+  and assert they agree; the layouts differ, the numbers must not.
+- **Every user-visible string**, and every element that echoes a value, not
+  just the headline number.
+
+For a dataset-backed calculator there is no arithmetic to diff. Check instead
+that every taxonomy node resolves, that IDs and names are consistent with
+upstream, that the selects' dependent levels populate, and that the asset
+parses and is the shape the JS expects.
 
 ## Gotchas
 
@@ -415,7 +527,12 @@ instance and issue views must produce identical numbers.
   Port the patterns, not the defects.
 - **`spec.authors`** — the clone leaves the original author's name on code
   they did not write. Set `['Dradis Team']`.
-- **No calculator has tests.** Neither the three add-ons nor dradis-ce's suite
-  covers them. Build the differential harness for your own confidence during
-  the port; shipping it as specs is a departure worth raising with the user
-  rather than assuming.
+- **No calculator ships tests**, and dradis-ce's suite does not cover them
+  either — not for want of something to test against (CVSS has FIRST's own
+  implementation, MITRE has the ATT&CK feeds, DREAD's formulas are fixed).
+  Verify during the port regardless; shipping the harness as specs is a
+  departure worth raising with the user rather than assuming.
+- **A model with no oracle is still portable**, just less provable. Say which
+  verification tier you reached instead of implying Tier 1 coverage.
+- **Licence-check anything you vendor.** Redistribution in a GPL-2 gem is not
+  automatic.
