@@ -7,7 +7,7 @@ code and external datasets, and how to verify the result.
 Throughout, `{name}` is the kebab-case calculator name; the examples below
 use `aivss-ssvc` to make the substitutions concrete. So `{name}` is
 `aivss-ssvc`, `{path}` its underscored form used in file paths and routes
-(`aivss_ssvc`), `{Module}` the Ruby module (`AivssSsvc`), and `{PREFIX}` the
+(`aivss_ssvc`), `{Module}` the Ruby module (`AIVSSSSVC`), and `{PREFIX}` the
 issue field prefix (`AIVSS-SSVC`).
 
 ## File layout
@@ -56,7 +56,7 @@ dradis-calculator_{name}/
 | Thing | Form | Example |
 |---|---|---|
 | Gem, folder | `dradis-calculator_{name}` | `dradis-calculator_aivss-ssvc` |
-| Ruby module | `Dradis::Plugins::Calculators::{Module}` | `…::AivssSsvc` |
+| Ruby module | `Dradis::Plugins::Calculators::{Module}` | `…::AIVSSSSVC` |
 | File paths | `dradis/plugins/calculators/{path}/` | `…/aivss_ssvc/` |
 | Route | `/calculators/{path}` | `/calculators/aivss_ssvc` |
 | Mounted as | `:{path}_calculator` | `:aivss_ssvc_calculator` |
@@ -66,19 +66,21 @@ dradis-calculator_{name}/
 hyphenated path segments. Underscoring also lets Rails auto-generate the
 route names, so no explicit `as:` is needed anywhere.
 
-### The Zeitwerk trap for acronym names
+### Acronym names and where the inflections go
 
 The existing calculators use all-caps modules (`CVSS`, `DREAD`, `MITRE`) and
-register `inflect.acronym` in the engine so Zeitwerk can map the directory
-name back to the constant. **This does not extend to two acronyms joined by
-an underscore.** With both acronyms registered:
+register `inflect.acronym` so Zeitwerk can map the directory name back to the
+constant. This extends to two acronyms joined by an underscore — the joined
+form round-trips as long as both acronyms are registered:
 
 ```ruby
-"aivss_ssvc".camelize   # => "AIVSSSSVC", not "AIVSS_SSVC"
+"aivss_ssvc".camelize     # => "AIVSSSSVC"
+"AIVSSSSVC".underscore    # => "aivss_ssvc"
 ```
 
-so Zeitwerk would look for `AIVSSSSVC` and fail to load. Before committing to
-a module name, check it round-trips:
+so `AIVSSSSVC` is a working module name, and that is what
+`dradis-calculator_aivss-ssvc` ships. Check whatever you pick round-trips
+before committing to it:
 
 ```bash
 ruby -e 'require "active_support/all"
@@ -87,13 +89,39 @@ ruby -e 'require "active_support/all"
   p "YourModule".underscore'
 ```
 
-A plain CamelCase module (`AivssSsvc`) round-trips with **no** inflection
-initializer at all, and still underscores to the directory name that
-`plugin_name` and the view-hook lookup need. Prefer it for multi-word names;
-keep the all-caps form only for a single acronym, where it works.
+**Register the inflections in exactly one place: `lib/dradis-calculator_{name}.rb`,
+before `engine.rb` is required.** This is a timing constraint, not a style
+preference. `isolate_namespace` underscores the module name at *require* time,
+so the acronyms have to already exist — an engine initializer runs far too
+late, and having them in both files is a duplicate that will drift:
 
-Registering acronyms is also global — it changes `camelize`/`underscore`
-everywhere in the host app. Not registering any is one less side effect.
+```ruby
+require 'dradis-plugins'
+
+# Single source of truth. Must run before requiring engine.rb: isolate_namespace
+# underscores the module name at require time, so both acronyms need to exist already.
+ActiveSupport::Inflector.inflections do |inflect|
+  inflect.acronym('AIVSS')
+  inflect.acronym('SSVC')
+end
+
+module Dradis
+  module Plugins
+    module Calculators
+      module AIVSSSSVC
+      end
+    end
+  end
+end
+
+require 'dradis/plugins/calculators/aivss_ssvc/engine'
+require 'dradis/plugins/calculators/aivss_ssvc/version'
+```
+
+Registering acronyms is global — it changes `camelize`/`underscore` everywhere
+in the host app. A plain CamelCase module (`AivssSsvc`) round-trips with **no**
+inflection registration at all and is the lighter option; use it when the name
+is not genuinely an acronym. When it is one, match the siblings and register.
 
 ## The engine
 
@@ -128,8 +156,20 @@ module Dradis::Plugins::Calculators::{Module}
 end
 ```
 
-`enabled?` comes from `Dradis::Plugins::Base` and defaults to true, so no
-`addon_settings` block is needed unless the calculator has its own settings.
+No `inflections` initializer belongs here — see "Acronym names and where the
+inflections go" above; by the time an engine initializer runs,
+`isolate_namespace` has already needed them.
+
+`enabled?` comes from `Dradis::Plugins::Base` and defaults to true, so most
+calculators need no `addon_settings` block at all. Add one only if the
+calculator has a setting worth exposing in the Configuration Manager — an
+optional field picker is one reason, not a required one:
+
+```ruby
+addon_settings :{path} do
+  settings.default_fields = '{PREFIX}.Likelihood,{PREFIX}.RiskScore'
+end
+```
 
 `description` matters beyond documentation: `render_view_hooks` sorts add-ons
 by it, which fixes the order of the Tools menu entries.
@@ -139,11 +179,12 @@ by it, which fixes the order of the Tools menu entries.
 ```ruby
 Dradis::Plugins::Calculators::{Module}::Engine.routes.draw do
   get '/calculators/{path}' => 'base#index'
+  post '/calculators/{path}/fields' => 'base#fields', as: :calculators_{path}_fields
 
   resources :projects, only: [] do
     resources :issues, only: [] do
       member do
-        get   '{path}' => 'issues#edit'
+        get '{path}' => 'issues#edit'
         patch '{path}' => 'issues#update'
       end
     end
@@ -151,8 +192,16 @@ Dradis::Plugins::Calculators::{Module}::Engine.routes.draw do
 end
 ```
 
-Yields `calculators_{path}_path` and `{path}_project_issue_path`. The latter
-is what `simple_form_for [:{path}, current_project, @issue]` resolves to.
+Yields `calculators_{path}_path`, `calculators_{path}_fields_path` and
+`{path}_project_issue_path`. The last is what
+`simple_form_for [:{path}, current_project, @issue]` resolves to.
+
+The `fields` endpoint is what renders the issue-field output; see "Field
+output is rendered server-side" below. Both levels post to it — it is not
+project-scoped, so there is one route rather than one per level.
+
+**Do not pad routes into columns.** `get`/`patch`/`post` line up on their own;
+adding spaces to align the paths makes every later edit a realignment.
 
 ## The model (`V1`)
 
@@ -199,9 +248,11 @@ NODES = {
 }.freeze
 ```
 
-The UI reveals questions as they unlock rather than showing all of them, and
-the **path** is part of the result: record it as an output field so a reader
-can audit how the outcome was reached. Restoring state means replaying the
+No shipped calculator has this shape yet, so there is no house UI to copy —
+whether the questions reveal progressively or all at once is a decision to take
+from the reference and state, not one this file settles. What does hold: the
+**path** is part of the result, so record it as an output field and let a
+reader audit how the outcome was reached. Restoring state means replaying the
 path, so validate that a saved path is still walkable — a tree revision can
 strand an old one, and it must fall back rather than raise.
 
@@ -230,6 +281,145 @@ FIELDS = FIELD_NAMES.map { |name| "{PREFIX}.#{name}".freeze }.freeze
 ```
 
 `%i[]` handles dotted names: `%i[Base.Score]` gives `:"Base.Score"`.
+
+### V1 is the only source of truth — including for the browser
+
+The JS must not restate a single definition from `V1`. That covers the obvious
+ones (option values, thresholds, defaults) and the ones it is tempting to keep
+"just in the UI" — outcome matrices, badge class names, timeline copy, help
+text. Two copies of a lookup table is two things to update and one of them
+will be missed.
+
+Serialize what the browser needs as **one** constant and hand it over as a
+single data attribute:
+
+```ruby
+FRONTEND_CONFIG = {
+  outcomeMatrix: OUTCOME_MATRIX,
+  timelineByOutcome: TIMELINE_BY_OUTCOME,
+  badgeClass: BADGE_CLASS
+}.freeze
+```
+
+```erb
+<div
+  data-behavior="{path}-calc"
+  data-{path}-config="<%= …::V1::FRONTEND_CONFIG.to_json %>"
+  data-{path}-fields-url="<%= calculators_{path}_fields_path %>"
+>
+```
+
+```js
+const config = JSON.parse(root.dataset.{path}Config);
+this.outcomeMatrix = config.outcomeMatrix;
+```
+
+Use camelCase keys inside `FRONTEND_CONFIG` — it is a JS object once it lands,
+and it should read like one. Render the attribute in **both** entry views so
+the two levels get identical definitions.
+
+Per-option data that a view already renders (an option's numeric value, its
+label, its issue field) belongs on that element as a `data-` attribute rather
+than in the config blob; the JS reads it off the selected element. Reserve the
+blob for whole tables and maps that have no single element to hang off.
+
+Issue field names count as definitions too. If the JS writes a computed value
+under a field name, that name comes from `V1` — either off a `data-field`
+attribute or through the config blob — never as a string literal in the JS. A
+literal there is a second copy of `FIELD_NAMES` that no one will remember to
+update.
+
+#### When the model is rules, not a table
+
+Some models classify by ordered predicates rather than by lookup: *any axis
+above X, else two or more above Y, else all below Z, else a tie-break.* That
+does not serialize to JSON without inventing a rule language, and trying is
+worse than not bothering.
+
+Split it instead. Every **value** the predicates test against, and every label,
+multiplier or explanatory string they return, goes in `V1` and travels in the
+config blob. Only the **branch order** stays in the JS, where it reads as the
+control flow it is:
+
+```ruby
+# In V1: the numbers and the strings.
+AGENT_THRESHOLDS = {
+  primemover: 4.0,
+  specialist: 3.0,
+  copilot: 2.5
+}.freeze
+
+AGENT_LEVELS = {
+  primemover: { label: 'Prime Mover', exposure: 8, rationale: '...' },
+  specialist: { label: 'Specialist', exposure: 4, rationale: '...' },
+  copilot: { label: 'Copilot', exposure: 2, rationale: '...' }
+}.freeze
+```
+
+```js
+// In the JS: only the order, and it is the reference's order.
+classifyAgent(...averages) {
+  const thresholds = this.agentThresholds;
+
+  if (averages.some((avg) => avg >= thresholds.primemover)) return this.agent('primemover');
+  if (averages.filter((avg) => avg >= thresholds.specialist).length >= 2) return this.agent('specialist');
+  if (averages.every((avg) => avg < thresholds.copilot)) return this.agent('copilot');
+  // ... tie-break
+}
+```
+
+The test for whether you have split it correctly: **grep the JS for numeric
+literals and for user-visible strings.** Neither should appear in the scoring
+path. Comparison operators and branch order should be all that is left.
+
+When you refactor an existing calculator this way, the branch order and the
+comparisons must come through unchanged — `>=` must not become `>`, and the
+rules must still be tested in the same sequence, because an earlier rule
+shadows a later one. Enumerate every reachable input and diff the old
+classification against the new one before and after; the input space for a
+classifier over a few averages is small enough to cover exhaustively.
+
+### Ruby formatting
+
+- **No alignment padding.** Never pad keys, `=>`, or values into columns —
+  not in a hash, not in a constant, not in the routes file. One space after
+  the key. Aligned code turns every subsequent edit into a realignment diff,
+  and the realignment buries the actual change in review.
+- **Multiline hashes when an entry has more than a couple of keys.** An option
+  carrying `key`, `label`, `value` and `description` gets one key per line:
+
+  ```ruby
+  THREAT_LEVELS = [
+    {
+      key: 'none',
+      label: 'None',
+      value: 0.2,
+      description: 'No evidence of exploitation or public proof of concept.'
+    },
+    {
+      key: 'poc',
+      label: 'Public PoC',
+      value: 0.5,
+      description: 'A public proof of concept or known exploitation method exists.'
+    }
+  ].freeze
+  ```
+
+  A short two- or three-key entry stays on one line. Do not mix the two styles
+  within one constant.
+- **`DEFAULTS` follows the same rule** — a flat hash, no padding:
+
+  ```ruby
+  DEFAULTS = {
+    'threat' => 'poc',
+    'vulnerability' => 'moderate',
+    'impact' => 'critical',
+    'factors' => {
+      'f1' => 4, 'f2' => 4, 'f3' => 4, 'f4' => 4, 'f5' => 3,
+      'f6' => 3, 'f7' => 3, 'f8' => 2, 'f9' => 3, 'f10' => 2
+    }.freeze
+  }.freeze
+  ```
 
 ## Output fields as an interface
 
@@ -368,6 +558,32 @@ end
 
 Test this by feeding the calculator's own saved output back through it.
 
+## Field output is rendered server-side
+
+The `#[Field]#` block the calculator writes into the issue is built by `V1`,
+and the browser asks the server for it. **The JS does not build field output
+itself** — doing so duplicates dradis-ce's `FieldParser` regex and the field
+list on the client, where they drift from the Ruby that has to parse them back.
+
+`V1` owns the rendering:
+
+```ruby
+def self.field_output(values = {}, fields: FIELDS)
+  (FIELDS & fields).map do |field|
+    value = values[field]
+    value = 'N/A' if value.blank?
+    "#[#{field}]#\n#{value}"
+  end.join("\n\n")
+end
+```
+
+`FIELDS & fields` both filters to the requested subset and forces `FIELDS`
+order, so a client cannot reorder or inject field names.
+
+`BaseController#fields` exposes it over the `POST` route, and the JS replaces
+the textarea contents with the response after every recalculation. Both the
+standalone page and the issue view post to the same endpoint.
+
 ## Controllers
 
 `BaseController < ActionController::Base` for the instance page.
@@ -377,22 +593,86 @@ Test this by feeding the calculator's own saved output back through it.
 skip_before_action :remove_unused_state_param
 ```
 
-Both actions build the `#[Field]#` skeleton the JS will patch:
+### Strong params, always
+
+**Never read `params[...]` inline in an action.** Every parameter goes through
+a private strong-params method, including the plain-text ones:
 
 ```ruby
-@issue_fields = V1::FIELDS.map do |field|
-  value = @issue.fields[field]
-  value = 'N/A' if value.blank?
-  "#[#{field}]#\n#{value}"
-end.join("\n\n")
+class BaseController < ActionController::Base
+  def index
+    @{path}_selection = V1::DEFAULTS
+    @issue_fields = V1.field_output
+  end
+
+  def fields
+    render plain: V1.field_output({path}_values_params, fields: requested_fields)
+  end
+
+  private
+
+  def {path}_values_params
+    params.fetch(:values, {}).permit(*V1::FIELDS).to_h
+  end
+
+  def requested_fields
+    Array(params.fetch(:fields, V1::FIELDS))
+  end
+end
 ```
 
-`update` parses the textarea back with dradis-ce's own regex:
+`permit(*V1::FIELDS)` is the point: the field list is the whitelist, so an
+unknown key cannot reach `set_field`.
+
+The issue-level `update` does the same before parsing the textarea back with
+dradis-ce's own regex:
 
 ```ruby
-fields = Hash[*params[:{path}_fields].to_s.scan(FieldParser::FIELDS_REGEX).flatten.map(&:strip)]
-fields.each { |name, value| @issue.set_field(name, value) }
+def update
+  {path}_fields = Hash[
+    *{path}_fields_param.scan(FieldParser::FIELDS_REGEX).flatten.map(&:strip)
+  ]
+
+  {path}_fields.each { |name, value| @issue.set_field(name, value) }
+
+  # Fields the user deselected are removed rather than left stale.
+  existing_fields = @issue.fields.keys & V1::FIELDS
+  (existing_fields - {path}_fields.keys).each { |name| @issue.delete_field(name) }
+
+  # ...
+end
+
+private
+
+def {path}_fields_param
+  params.fetch(:{path}_fields, '').to_s
+end
 ```
+
+### Name every inline collection
+
+A literal array or hash used inside a method body gets a name — a local, or a
+constant when it does not depend on the request:
+
+```ruby
+# Not: V1::FIELDS.group_by { |f| %w[Threat Impact].include?(…) ? … }
+input_fields = %w[Threat Threat.Value Vulnerability Vulnerability.Value Impact Impact.Value]
+
+grouped_fields = V1::FIELDS.group_by do |field|
+  name = field.delete_prefix('{PREFIX}.')
+
+  if input_fields.include?(name)
+    'Inputs'
+  elsif V1::FACTORS.any? { |factor| factor[:field] == name }
+    'Capability Factors'
+  else
+    'Calculated Results'
+  end
+end
+```
+
+The name is what tells the next reader what the literal *is*; without it the
+condition has to be reverse-engineered from its contents.
 
 ## Views
 
@@ -404,6 +684,31 @@ a layout belongs.
 
 Content partials read controller ivars directly (as DREAD's read
 `@dread_vector`). No locals plumbing.
+
+Both entry views carry the `data-behavior`, `data-{path}-config` and
+`data-{path}-fields-url` attributes on the calculator root, so the JS gets the
+same definitions and the same endpoint at either level.
+
+### ERB indentation
+
+Nested ERB blocks indent one level per block, exactly like the HTML around
+them. It is easy to land on two levels at once when an `<% … do %>` and a tag
+open on the same line — read the partial back and check each `<% end %>` sits
+at the indentation of its opener.
+
+### The standalone layout needs Hera's stylesheet
+
+The add-on's own layout links two stylesheets, `hera` first and the
+calculator's own second, so the standalone page picks up Hera's theme custom
+properties and Bootstrap before the calculator's rules override anything:
+
+```erb
+<%= stylesheet_link_tag 'hera', media: 'all', 'data-turbo-track': 'reload' %>
+<%= stylesheet_link_tag 'dradis/plugins/calculators/{path}/base', media: 'all', 'data-turbo-track': 'reload' %>
+```
+
+Without the `hera` link the standalone page renders unstyled where the issue
+tab looks correct, because in-app the host already loaded it.
 
 ### The two levels have very different widths
 
@@ -440,6 +745,42 @@ calculators at once rather than one diverging.
 
 Add `data-combobox-config="no-combobox"` to every `<select>`, or Dradis's
 combobox module will rewrite them on the issue page.
+
+### The field picker (optional)
+
+CVSS, DREAD and MITRE write their fields unconditionally, and for a handful of
+fields that is the right call — a picker is UI the user has to operate for no
+gain. It earns its place when a model produces enough fields that writing all
+of them would bury the issue.
+
+If you do add one, this is the shape: switches for which `{PREFIX}.*` fields
+get written, grouped so a long list stays readable (inputs, intermediate
+values, calculated results):
+
+```erb
+<div class="form-check form-switch mb-2">
+  <input class="form-check-input"
+         type="checkbox"
+         role="switch"
+         id="{path}-field-<%= field.parameterize %>"
+         data-behavior="{path}-field-switch"
+         data-field-name="<%= field %>"
+         <%= 'checked' if @enabled_fields.include?(field) %>>
+  <label class="form-check-label" for="{path}-field-<%= field.parameterize %>"><%= field %></label>
+  <p class="small mb-0" data-behavior="{path}-field-value" data-field-name="<%= field %>"></p>
+</div>
+```
+
+- The switches feed the `fields:` list posted to `base#fields`, so toggling one
+  re-renders the output server-side rather than editing the textarea client-side.
+- The initial state comes from the issue's existing `{PREFIX}.*` fields when
+  it has any, and from an `addon_settings` default when it does not, which puts
+  the default for new scores in the Configuration Manager.
+- On `update`, fields the user switched off are `delete_field`ed rather than
+  left behind at their old values. This is the part that is easy to forget and
+  produces wrong data when you do.
+- "Select all" / "Deselect all" links, once the list runs past a dozen.
+- The textarea becomes `class: 'd-none'` — the switches are the UI.
 
 ### View hooks
 
@@ -488,31 +829,90 @@ own. If you transcribed instead, port the source's logic verbatim — same
 branch order, same comparisons, same rounding — and mark it as ported so
 nobody "improves" it later.
 
+**No free-floating constants.** Everything the calculator needs lives on the
+instance, read in the constructor — either off `FRONTEND_CONFIG` or off the
+elements' own `data-` attributes. Nothing sits at module scope between the
+`turbo:load` listener and the class:
+
 ```js
 document.addEventListener('turbo:load', () => {
   const root = document.querySelector('[data-behavior~={path}-calc]');
   if (!root) return;
-  // ... constants ported verbatim from the source ...
-  new Calculator(root).init();
+
+  class {Module}Calculator {
+    constructor(root) {
+      this.root = root;
+
+      const config = JSON.parse(root.dataset.{path}Config);
+      this.outcomeMatrix = config.outcomeMatrix;
+      this.badgeClass = config.badgeClass;
+
+      this.fieldsUrl = root.dataset.{path}FieldsUrl;
+      this.values = {};
+    }
+
+    // ... logic ported verbatim from the source, marked as ported ...
+  }
+
+  new {Module}Calculator(root).init();
 });
 ```
 
-**Patch the field skeleton in place** rather than regenerating it, so the
-field list and its order live only in Ruby:
+**Ask the server for the field output.** The JS collects the computed values
+into `this.values` and posts them; it never assembles `#[Field]#` blocks or
+re-implements `FieldParser`'s regex:
+
+The `fieldSwitches` branch below is only needed if you added the optional field
+picker; without one, the calculator posts everything it computed.
 
 ```js
-escapeRegex(string) {
-  return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
+async writeResult() {
+  if (!this.result || !this.fieldsUrl) return;
 
-updateResult(field, value) {
-  const regex = new RegExp(`(#\\[${this.escapeRegex(field)}\\]#\\n)(.*?)(\\n|$)`, 'g');
-  this.result.value = this.result.value.replace(regex, (_m, before, _old, after) => `${before}${value}${after}`);
+  let fields;
+  if (this.fieldSwitches.length) {
+    fields = this.fieldSwitches.filter((s) => s.checked).map((s) => s.dataset.fieldName);
+  } else {
+    fields = Object.keys(this.values);
+  }
+
+  // Responses can land out of order; only the newest one may write.
+  const requestId = ++this.fieldRequestId;
+  const csrfToken = document.querySelector('meta[name=csrf-token]')?.content;
+
+  const response = await fetch(this.fieldsUrl, {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: {
+      'Accept': 'text/plain',
+      'Content-Type': 'application/json',
+      'X-CSRF-Token': csrfToken
+    },
+    body: JSON.stringify({ fields, values: this.values })
+  });
+
+  if (response.ok) {
+    const output = await response.text();
+    if (requestId === this.fieldRequestId) this.result.value = output;
+  } else {
+    console.error(`{NAME}: failed to fetch field output (${response.status})`);
+  }
 }
 ```
 
-Escape the field name — field names contain dots. Use a replacement function
-rather than `'$1' + value + '$3'` so a `$` in a value cannot corrupt output.
+Three things that are easy to leave out and all of them matter:
+
+- **`credentials: 'same-origin'` and the CSRF token.** Rails rejects the POST
+  without them.
+- **Guard against out-of-order responses.** Every click fires a request; a
+  slow earlier one must not overwrite a fast later one.
+- **Handle the failure branch.** A `fetch` that resolves non-2xx is not an
+  exception — check `response.ok` and say something on the `else`. Silently
+  leaving stale output in the textarea is the worst outcome here.
+
+**`if`/`else` over the ternary** for anything that is not a trivial one-line
+expression. A ternary spanning lines, or one whose branches are themselves
+expressions, reads worse than the four-line `if`.
 
 **Use `querySelectorAll` when updating by behavior**, not `querySelector`:
 the issue view echoes the score in the Result pill as well as the results
@@ -611,12 +1011,23 @@ parses and is the shape the JS expects.
 - **`git ls-files` in the gemspec** — the gemspec computes `spec.files` from
   it, so an un-`init`ed folder builds an empty gem. `git init` the add-on.
 - **Rounding is part of the model.** Match the source's arithmetic exactly.
-- **Don't copy sibling bugs.** MITRE defines `escapeRegex` but forgets to
-  apply it in `updateResult`; CVSS carries a rhetorical comment about
-  inheriting from a "no-frills controller" that is wrong on `IssuesController`.
-  Port the patterns, not the defects.
+- **Don't copy sibling bugs, or their client-side field building.** The older
+  calculators assemble `#[Field]#` output in JavaScript, re-implementing
+  dradis-ce's `FieldParser` regex — MITRE even defines `escapeRegex` and then
+  forgets to apply it. Render field output server-side instead. CVSS likewise
+  carries a rhetorical comment about inheriting from a "no-frills controller"
+  that is wrong on `IssuesController`. Port the patterns, not the defects.
 - **`spec.authors`** — the clone leaves the original author's name on code
   they did not write. Set `['Dradis Team']`.
+- **Strip the clone's boilerplate cruft.** The sibling's gemspec carries
+  commented-out dependency notes for Rails versions that no longer matter, and
+  its `.gitignore` may start with a blank line. Delete both; a new gem should
+  not ship a stale comment explaining a decision it never made.
+- **Don't tell users to edit the model's defaults.** The README documents what
+  the defaults *are* and that they match the reference calculator. Inviting
+  users to change hardcoded official values in the gem source is not a
+  supported workflow, and it puts their install out of agreement with the
+  model owner.
 - **No calculator ships tests**, and dradis-ce's suite does not cover them
   either — not for want of something to test against (CVSS has FIRST's own
   implementation, MITRE has the ATT&CK feeds, DREAD's formulas are fixed).
@@ -626,3 +1037,22 @@ parses and is the shape the JS expects.
   verification tier you reached instead of implying Tier 1 coverage.
 - **Licence-check anything you vendor.** Redistribution in a GPL-2 gem is not
   automatic.
+
+## Review conventions
+
+The dradis reviewers apply these consistently; getting them right the first
+time is cheaper than a round trip.
+
+| Convention | Why |
+|---|---|
+| No alignment padding anywhere — hashes, constants, routes | Realignment diffs bury the real change |
+| Multiline hash per entry once it has several keys | Diffs stay one-key-wide |
+| Strong params for every `params[...]` read | The action stays free of parameter handling; the field list is the whitelist |
+| Name inline arrays/hashes (`input_fields`, not a literal in a conditional) | The name is the documentation |
+| One definition, in `V1`, serialized to the browser — values, not control flow | Two copies of a lookup table means one goes stale |
+| Server renders field output; JS posts values and swaps in the response | No duplicated `FieldParser` regex on the client |
+| JS constants inside the class, read in the constructor | Nothing floats at module scope |
+| `if`/`else` over multi-line ternaries | Reads as branching, because it is |
+| Handle the non-`ok` branch of every `fetch` | A silent stale textarea is the worst failure |
+| Register inflections once, in `lib/dradis-calculator_{name}.rb` | `isolate_namespace` needs them at require time; the engine is too late |
+| ERB nests one level per block | Two-level jumps hide a mis-closed block |
