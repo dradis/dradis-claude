@@ -11,8 +11,10 @@ argument-hint: [source-url-or-file] [calculator-name]
 
 You are a Dradis Framework calculator builder. Given one reference to a
 scoring model, you produce a new `dradis-calculator_*` add-on gem that brings
-the model into Dradis at the instance level and on each issue, boots in the
-host, and passes the host's lint.
+the model into Dradis at the instance level and on each issue, verified
+against the source, plus the instructions a user follows to install and test
+it on a Dradis CE instance. You do not need a Dradis checkout, and you do not
+touch one.
 
 The defining constraint: **someone else owns the model.** Your output is
 correct only if it agrees with that owner for every input. How faithfully you
@@ -141,7 +143,7 @@ Three rules carry most of the weight:
 - **Shared**: `base#fields`
 
 Both entry views render the same content partials. The view hooks are
-discovered automatically — the host needs no code change.
+discovered automatically — Dradis needs no code change.
 
 ## Step 7 — Verify the port
 
@@ -154,35 +156,37 @@ asks (reference.md "Specs").
 
 ## Step 8 — Lint
 
-Run the host's rubocop config over the whole gem and fix every offense
-(reference.md "Lint"). `node --check` every JS file. Grep for leftover names
-from any calculator you read.
+Run rubocop with Dradis CE's `.rubocop.yml` over the whole gem and fix every
+offense (reference.md "Lint"). `node --check` every JS file. Grep for leftover
+names from any calculator you read. If rubocop isn't installed, the lint
+command goes in the CE instructions instead.
 
-## Step 9 — Smoke test in the host
+## Step 9 — Write the Dradis CE instructions
 
-Add the gem to the host's `Gemfile.plugins` (gitignored, local only), then
-`zeitwerk:check`, `routes`, and a browser pass over both levels —
-reference.md "Smoke test in the host". This is the only step that boots the
-engine; a calculator that has not been through it is not "working".
-
-Adding the gem to the host's tracked `Gemfile` Calculators block is a host
-release change — leave it, and mention it in the report.
+Nothing so far has booted the engine. Inflection, routing, asset and view-hook
+mistakes only show up in a running Dradis, so the user does that part. Write
+the instructions from reference.md "Dradis CE instructions": install into a CE
+checkout, the boot checks, and numbered test steps for both levels. The test
+steps include one scored case from your verification, with its expected
+output, so the user can confirm the running calculator agrees with the
+reference.
 
 ## Step 10 — Report
 
 - The verification tier reached, what it covered, and the counts
-- Spec, lint and smoke-test results — each one run, or explicitly unrun and why
+- Lint results, or that lint was moved to the CE instructions and why
 - The defaults you took
 - An offer to ship the port's Ruby-side checks as specs
-- Testing steps for the PR, in the format of the host's
-  `.claude/skills/testing-steps/SKILL.md`
+- The Dradis CE instructions, in full, ready to follow
+- Say plainly that the gem has not been booted in Dradis until the user
+  follows them
 
 ## Output Rules
 
 - A **new sibling directory** `dradis-calculator_{name}/`, never a change
   inside an existing calculator
 - Vendored upstream code unmodified, with its source recorded in the README
-- Never commit, push, or edit a tracked file in the host unless the user asks
+- Never commit or push unless the user asks
 
 ## Quality Checks
 
@@ -214,6 +218,6 @@ Each item points at the reference.md section that defines it.
 - [ ] No strings left from any calculator you read
 
 **Runs**
-- [ ] Host rubocop config: zero offenses; `node --check` clean
-- [ ] `zeitwerk:check` passes; the three route helpers are listed
-- [ ] Both levels exercised in a browser, or the unrun checks listed for the user
+- [ ] Rubocop with CE's config: zero offenses, or the command is in the CE instructions
+- [ ] `node --check` clean
+- [ ] CE instructions cover install, `zeitwerk:check`, `routes`, both levels, and one known case with its expected output

@@ -88,10 +88,10 @@ The skill will:
 2. Classify the model's shape (discrete metrics, numeric scales, taxonomy, lookup table, multi-version) to pick the UI
 3. Scaffold the gem from the AIVSS-SSVC boilerplate and build it, available at both the instance level and on each issue
 4. Verify at the strongest tier the source allows
-5. Lint with the host's rubocop config and smoke-test the engine booted in the host
-6. Report the verification tier and the defaults taken
+5. Lint with Dradis CE's rubocop config
+6. Report the verification tier and the defaults taken, with instructions for installing and testing the calculator on a Dradis CE instance
 
-**Produces:** A new `dradis-calculator_{name}/` sibling directory that boots in Dradis and passes lint.
+**Produces:** A new `dradis-calculator_{name}/` sibling directory that is verified against the source, plus Dradis CE install and test instructions.
 
 
 ## Samples

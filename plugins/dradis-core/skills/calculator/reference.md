@@ -2,7 +2,8 @@
 
 Everything a `dradis-calculator_*` add-on needs: the file layout, the
 boilerplate, the conventions each file follows, the naming traps, the patterns
-for vendored code and external datasets, and how to verify, lint and smoke-test
+for vendored code and external datasets, how to verify and lint, and the
+Dradis CE instructions handed to the user
 the result.
 
 Throughout, `{name}` is the kebab-case calculator name; the examples below
@@ -94,7 +95,7 @@ git tag -l 'vX.Y.Z'      # listed => released => target vX.(Y+1).0
 ```
 
 If that version is tagged, target the next minor; otherwise target that
-version. If the host's `release-X.Y.Z` branches disagree, ask.
+version. If Dradis's `release-X.Y.Z` branches disagree, ask.
 
 `MAJOR`/`MINOR`/`TINY` in `gem_version.rb` and the CHANGELOG header carry
 **the same version**:
@@ -161,10 +162,10 @@ require 'dradis/plugins/calculators/aivss_ssvc/engine'
 require 'dradis/plugins/calculators/aivss_ssvc/version'
 ```
 
-Acronyms are global — they change `camelize`/`underscore` across the host. A
+Acronyms are global — they change `camelize`/`underscore` across all of Dradis. A
 plain CamelCase module (`AivssSsvc`) needs no registration; use it when the
-name is not genuinely an acronym. `bin/rails zeitwerk:check` in the host (see
-"Smoke test in the host") is the proof either way.
+name is not genuinely an acronym. `bin/rails zeitwerk:check`, in the Dradis CE
+instructions, is the proof either way.
 
 ## The engine
 
@@ -654,7 +655,7 @@ as a rule of thumb, more than about a dozen fields. If you add one:
 
 ### View hooks
 
-Discovered automatically by `render_view_hooks` — nothing in the host changes:
+Discovered automatically by `render_view_hooks` — nothing in Dradis changes:
 
 ```erb
 <%# _tools_menu.html.erb %>
@@ -807,8 +808,8 @@ No calculator ships specs, so the new one doesn't by default. The checks below
 run during the port, in the harness. In the report, offer to ship them as specs.
 
 If the user says yes, add `spec/models/dradis/plugins/calculators/{path}/v1_spec.rb`.
-It uses the host's `rails_helper`, as host-mode add-ons do, and reads fixtures
-captured from the calculator's own output during the smoke test:
+It uses Dradis CE's `rails_helper`, as other add-ons run from CE do, and reads
+fixtures captured from the harness:
 
 ```ruby
 require 'rails_helper'
@@ -848,15 +849,16 @@ describe Dradis::Plugins::Calculators::{Module}::V1 do
 end
 ```
 
-`saved_output.txt` is the field output from a save made with every input at a
-non-default value; `saved_selection.json` is that selection. Run from the host:
+`saved_output.txt` is the harness's field output for every input at a
+non-default value; `saved_selection.json` is that selection. The specs need
+Dradis CE to run, so the spec command goes in the CE instructions:
 
 ```bash
-cd ../dradis-ce
+cd dradis-ce
 bundle exec rspec ../dradis-calculator_{name}/spec
 ```
 
-rspec resolves `rails_helper` against the cwd, so it loads the host's.
+rspec resolves `rails_helper` against the working directory, so it loads CE's.
 
 ## Verifying the port
 
@@ -909,61 +911,95 @@ For a dataset-backed calculator: every taxonomy node resolves, IDs and names
 match upstream, dependent selects populate, the asset parses into the shape
 the JS expects.
 
-The harness lives outside the gem, in a scratch directory. Run the Ruby-side
-checks against `V1` with `bin/rails runner` in the host.
+The harness lives outside the gem, in a scratch directory. The Ruby-side checks
+need only `activesupport`: define the empty namespace modules, then `load` the
+`v1.rb` file.
+
+```ruby
+require 'active_support/all'
+
+module Dradis; module Plugins; module Calculators; module {Module}; end; end; end; end
+load 'app/models/dradis/plugins/calculators/{path}/v1.rb'
+```
 
 ## Lint
 
-Run the host's rubocop config over the whole gem — every file is new, so the
-host's diff-based `bin/rubocop-ci` adds nothing:
+Lint with Dradis CE's own rubocop config, fetched from its public repo. CE's
+config disables every cop it doesn't list, so the stock rubocop defaults
+don't apply:
 
 ```bash
+curl -fsSL https://raw.githubusercontent.com/dradis/dradis-ce/develop/.rubocop.yml -o /tmp/dradis-ce-rubocop.yml
 cd dradis-calculator_{name}
-BUNDLE_GEMFILE=../dradis-ce/Gemfile bundle exec rubocop -c ../dradis-ce/.rubocop.yml --force-exclusion
+rubocop -c /tmp/dradis-ce-rubocop.yml --force-exclusion
 ```
 
-Zero offenses before you report. If rubocop is not in the host bundle, say the
-lint did not run rather than skipping it silently.
+Zero offenses before you report. If `rubocop` isn't installed, don't install
+it; put the lint command in the CE instructions and say lint didn't run.
 
 Also: `node --check` on every JS file, and grep the gem for the names of
 any calculator you read, and their field prefixes.
 
-## Smoke test in the host
+## Dradis CE instructions
 
-The harness never boots the engine. This does, and it is the only
-thing that catches inflection, routing, asset and view-hook mistakes.
+The final report includes these, filled in for the calculator. They're for a
+user with a Dradis CE development checkout ([dradis/dradis-ce](https://github.com/dradis/dradis-ce),
+`develop`) beside the gem folder.
 
-1. Point the host at the gem. `Gemfile.plugins` is gitignored and the new gem
-   is not yet in the host `Gemfile`, so append there:
+````markdown
+### Install
+
+1. In `dradis-ce`, add this line to `Gemfile.plugins` (copy
+   `Gemfile.plugins.template` to `Gemfile.plugins` first if it doesn't exist):
 
    ```ruby
    gem 'dradis-calculator_{name}', path: '../dradis-calculator_{name}'
    ```
 
-2. From the host:
+2. From `dradis-ce`:
 
    ```bash
    bundle install
-   bin/rails zeitwerk:check
-   bin/rails routes -g {path}
-   bin/rails runner 'p Dradis::Plugins::Calculators::{Module}::Engine.enabled?'
+   bin/rails zeitwerk:check      # expect "All is good!"
+   bin/rails routes -g {path}    # expect calculators_{path}, calculators_{path}_fields, {path}_project_issue
    ```
 
-   `zeitwerk:check` must pass; `routes` must list `calculators_{path}`,
-   `calculators_{path}_fields` and `{path}_project_issue`.
+3. Start Dradis with `bin/rails server`, or restart it if it was already running.
 
-3. Start the server and, with a browser (the `run` skill, or Claude in Chrome
-   if available):
-   - open `/calculators/{path}` — styled, every control works, the field
-     output updates on each change;
-   - open an issue, use the **{NAME}** tab, save, and assert the fields landed
-     on the issue;
-   - reopen the tab and assert every control is in the saved state;
-   - the Tools menu lists the calculator;
-   - the browser console has no errors.
+### Test
 
-If you cannot start the server, list the step-3 checks for the user and say
-they are unrun.
+1. Open **Tools > Risk Calculators - {NAME}**. The page loads styled and the
+   field output panel shows the default selection.
+2. Set the inputs to: {a case from the verification, as label values}.
+3. Confirm the score reads {expected score} and the verdict reads
+   {expected verdict}, the same as the reference.
+4. Change one input. Confirm the field output updates.
+5. Open any issue and select the **{NAME}** tab. Set the same inputs as step 2
+   and save.
+6. Confirm the issue now shows `{PREFIX}.Vector`, `{PREFIX}.{Score}` = {expected score}
+   and the other `{PREFIX}.*` fields.
+7. Reopen the **{NAME}** tab. Confirm every input is in the state you saved.
+8. Edit the issue, change `{PREFIX}.Vector` to `not-a-vector`, and save.
+   Reopen the tab. Confirm it opens on the defaults instead of erroring.
+9. Check the browser console on both pages: no errors.
+
+### Remove
+
+Delete the line from `Gemfile.plugins`, run `bundle install` and restart.
+````
+
+Add, where they apply:
+
+- the lint command, run from the gem with `BUNDLE_GEMFILE=../dradis-ce/Gemfile
+  bundle exec rubocop -c ../dradis-ce/.rubocop.yml --force-exclusion`, if lint
+  didn't run during the build;
+- the spec command, if the user asked for specs;
+- the field picker (switch a field off, save, confirm it's removed from the
+  issue and the vector is still written), if there is one.
+
+The new gem is not in CE's tracked `Gemfile`, so `Gemfile.plugins` is the
+right place for it. Adding it to the `Gemfile` Calculators block is a Dradis
+release change, not part of this skill.
 
 ## Out of scope
 
