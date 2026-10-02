@@ -12,14 +12,14 @@ argument-hint: [source-url-or-file] [calculator-name]
 You are a Dradis Framework calculator builder. Given one reference to a
 scoring model, you produce a new `dradis-calculator_*` add-on gem that brings
 the model into Dradis at the instance level and on each issue, boots in the
-host, passes the host's lint, and ships specs.
+host, and passes the host's lint.
 
 The defining constraint: **someone else owns the model.** Your output is
 correct only if it agrees with that owner for every input. How faithfully you
 can reproduce it depends on what the source gives you; how well you can
 *prove* it depends on what the source lets you check against.
 
-Everything detailed — templates, conventions, code patterns, commands — is in
+Everything detailed — boilerplate, conventions, code patterns, commands — is in
 [reference.md](reference.md). This file is the workflow.
 
 ## Input
@@ -72,7 +72,7 @@ table cell for cell, classification thresholds **and the order their branches
 are tested in**, every user-visible string, the state the reference loads
 with, and its rounding and formatting — which are part of the model.
 
-Save what you captured as a fixture; the specs assert `V1` against it.
+Keep what you captured; the constants check asserts `V1` against it.
 
 ## Step 2 — Classify the model's shape
 
@@ -94,8 +94,8 @@ the JS. Both are in reference.md "The model (`V1`)".
 for app code: it is the only calculator with the server-rendered field output,
 the single `V1` config blob and strong params throughout. Read it whatever
 the shape. Read CVSS as well for vendoring or multi-version, and MITRE for an
-external dataset. Never copy boilerplate from any of them — it comes from the
-templates in reference.md.
+external dataset. Copy boilerplate only from AIVSS-SSVC (reference.md
+"Boilerplate").
 
 ## Step 3 — Design the output fields
 
@@ -114,11 +114,10 @@ gem. If the calculator is meant to feed a kit or theme, `/dradis-core:kit` and
 
 ## Step 4 — Scaffold the gem
 
-Create `dradis-calculator_{name}/` as a sibling of the other calculators and
-write the boilerplate from reference.md "Boilerplate": gemspec, Gemfile,
-Rakefile, `.gitignore`, CONTRIBUTING, `.github/pull_request_template.md`,
-LICENSE, CHANGELOG, version files. reference.md "Cruft in the older
-calculators" lists what not to carry over from the existing gems.
+Create `dradis-calculator_{name}/` as a sibling of the other calculators.
+Copy the boilerplate from AIVSS-SSVC, substitute the names, and set the
+version, as reference.md "Boilerplate" describes. Copy nothing from CVSS,
+DREAD or MITRE's boilerplate; that section lists what review rejected in them.
 
 ## Step 5 — Build the app
 
@@ -144,15 +143,14 @@ Three rules carry most of the weight:
 Both entry views render the same content partials. The view hooks are
 discovered automatically — the host needs no code change.
 
-## Step 7 — Verify the port, and write the specs
+## Step 7 — Verify the port
 
 **Do not claim parity you have not measured.** Use the strongest tier Step 1
 allowed — differential, published vectors, or hand-derived — plus the
-structural checks (reference.md "Verifying the port"). The harness lives in a
-scratch directory.
-
-Then write the shipped Ruby specs (reference.md "Specs"): constants against
-the captured fixture, round-trip, fallback, `field_output`.
+structural checks: constants, round-trip and fallback (reference.md
+"Verifying the port"). The harness lives in a scratch directory and does not
+ship; no calculator ships specs, so the gem doesn't either unless the user
+asks (reference.md "Specs").
 
 ## Step 8 — Lint
 
@@ -163,7 +161,7 @@ from any calculator you read.
 ## Step 9 — Smoke test in the host
 
 Add the gem to the host's `Gemfile.plugins` (gitignored, local only), then
-`zeitwerk:check`, `routes`, the specs, and a browser pass over both levels —
+`zeitwerk:check`, `routes`, and a browser pass over both levels —
 reference.md "Smoke test in the host". This is the only step that boots the
 engine; a calculator that has not been through it is not "working".
 
@@ -175,6 +173,7 @@ release change — leave it, and mention it in the report.
 - The verification tier reached, what it covered, and the counts
 - Spec, lint and smoke-test results — each one run, or explicitly unrun and why
 - The defaults you took
+- An offer to ship the port's Ruby-side checks as specs
 - Testing steps for the PR, in the format of the host's
   `.claude/skills/testing-steps/SKILL.md`
 
@@ -191,7 +190,7 @@ Each item points at the reference.md section that defines it.
 
 **Correctness**
 - [ ] Verification ran; tier, coverage and counts stated ("Verifying the port")
-- [ ] `V1` constants match the source, asserted against a fixture ("Specs")
+- [ ] `V1` constants match the source, checked programmatically
 - [ ] A saved score reopens in the state it was saved in ("Restoring saved state")
 - [ ] Malformed or partial values fall back instead of raising
 - [ ] "Not defined" values round-trip
@@ -210,14 +209,11 @@ Each item points at the reference.md section that defines it.
 - [ ] Any external dataset ships as an asset with the script that made it
 
 **Boilerplate** ("Boilerplate")
-- [ ] `spec.files` is a `Dir` glob; `rake` unpinned; no commented-out dependencies
-- [ ] Gemfile is `source` + `gemspec` only
-- [ ] `.github/` has no `issue_template.md`; CONTRIBUTING links `dradis-ce`
+- [ ] Copied from AIVSS-SSVC with names substituted; nothing from CVSS, DREAD or MITRE
 - [ ] `gem_version.rb` and the CHANGELOG header carry the same, next-release version
 - [ ] No strings left from any calculator you read
 
 **Runs**
-- [ ] `v1_spec.rb` passes from the host
 - [ ] Host rubocop config: zero offenses; `node --check` clean
 - [ ] `zeitwerk:check` passes; the three route helpers are listed
 - [ ] Both levels exercised in a browser, or the unrun checks listed for the user

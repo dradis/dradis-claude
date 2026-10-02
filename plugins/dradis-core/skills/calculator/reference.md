@@ -27,8 +27,6 @@ dradis-calculator_{name}/
 │       ├── engine.rb
 │       ├── gem_version.rb
 │       └── version.rb
-├── spec/
-│   └── models/dradis/plugins/calculators/{path}/v1_spec.rb
 └── app/
     ├── models/dradis/plugins/calculators/{path}/v1.rb
     ├── controllers/dradis/plugins/calculators/{path}/
@@ -56,168 +54,55 @@ dradis-calculator_{name}/
 
 ## Boilerplate
 
-Write these from the templates below. **Do not copy them from an older
-calculator** — CVSS, DREAD and MITRE still carry cruft that review has already
-rejected once (see "Cruft in the older calculators").
+Copy the non-app files from **dradis-calculator_aivss-ssvc**, the one
+calculator whose boilerplate has been through review: the gemspec, `Gemfile`,
+`Rakefile`, `.gitignore`, `LICENSE`, `CONTRIBUTING.md`, `CHANGELOG.template`,
+`.github/pull_request_template.md`, and `lib/…/gem_version.rb` / `version.rb`.
+Substitute the names, and nothing else, so the new gem matches the ones beside
+it. Then:
 
-### `dradis-calculator_{name}.gemspec`
+- **Version** — set `gem_version.rb` as below.
+- **`CHANGELOG.md`** — replace the body with the new gem's single entry.
+- **`README.md`** — written fresh (see "Conventions"), not substituted.
+- **`gem_version.rb`** — the copied `join(".")` is double-quoted; make it
+  `join('.')`, or the lint step fails on it.
 
-```ruby
-require_relative 'lib/dradis/plugins/calculators/{path}/version'
+Do not copy boilerplate from CVSS, DREAD or MITRE. They still carry what the
+AIVSS-SSVC review removed:
 
-Gem::Specification.new do |spec|
-  spec.platform = Gem::Platform::RUBY
-  spec.name = 'dradis-calculator_{name}'
-  spec.version = Dradis::Plugins::Calculators::{Module}::VERSION::STRING
-  spec.summary = 'This plugin adds a {NAME} score calculator to Dradis.'
-  spec.description = 'Display a {NAME} calculator in Dradis Framework.'
+| Rejected in review | Still in |
+|---|---|
+| `.github/issue_template.md` — Dradis keeps one tracker, on dradis-ce | CVSS, DREAD, MITRE |
+| CONTRIBUTING link to `dradis/dradisframework` rather than `dradis-ce` | CVSS, DREAD, MITRE |
+| Commented `dradis_core` / `dradisframework` lines in `Gemfile` | DREAD, MITRE |
+| `# s.add_dependency 'rails', '~> 4.1.1'` note in the gemspec | DREAD, MITRE |
+| Client-side `#[Field]#` building in JS | CVSS, DREAD, MITRE |
 
-  spec.license = 'GPL-2'
-
-  spec.authors = ['Dradis Team']
-  spec.homepage = 'https://dradis.com/support/guides/projects/calculators.html'
-
-  spec.files = Dir.chdir(File.expand_path(__dir__)) do
-    Dir['{app,config,db,lib}/**/*', 'CHANGELOG.md', 'LICENSE', 'Rakefile', 'README.md']
-  end
-
-  spec.add_dependency 'dradis-plugins', '>= 4.0'
-
-  spec.add_development_dependency 'bundler', '~> 2.0'
-  spec.add_development_dependency 'rake'
-end
-```
-
-- `spec.files` is a `Dir` glob, not `` `git ls-files` `` — the gem must build
-  without a git repo (CVSS `44282c4` "Avoid Git dependency in gemspec").
-  Vendored assets under `app/` are picked up by the glob; anything outside
-  the listed roots (e.g. `scripts/`) is deliberately not shipped.
-- `rake` is unpinned. The older calculators pin `~> 10.0`, which only allows
-  rake versions affected by CVE-2020-8130.
-- No `executables`/`test_files` lines: the gem has no `bin/`, and `spec/` is
-  outside the glob.
-- No commented-out dependency notes.
-
-### `Gemfile`
-
-```ruby
-source 'https://rubygems.org'
-
-gemspec
-```
-
-Nothing else — no commented-out `dradis_core`/`dradisframework` lines.
-
-### `Rakefile`
-
-```ruby
-require 'bundler/gem_tasks'
-```
-
-### `.gitignore`
-
-```
-# Bundler config
-Gemfile.lock
-/.bundle/
-/vendor/bundle/
-
-# Gem artifacts
-/pkg/
-```
-
-No leading blank line.
-
-### `CONTRIBUTING.md`
-
-```markdown
-# Plugin contribution guidelines
-
-See the Dradis Framework's [CONTRIBUTING.md](https://github.com/dradis/dradis-ce/blob/master/CONTRIBUTING.md)
-```
-
-`dradis-ce`, not `dradisframework`.
-
-### `.github/`
-
-Only `pull_request_template.md`, copied from `dradis-calculator_aivss-ssvc`.
-**No `issue_template.md`** — Dradis keeps one tracker, on dradis-ce, not one
-per add-on.
-
-### `LICENSE`, `CHANGELOG.template`
-
-Copy verbatim from `dradis-calculator_aivss-ssvc`.
+Fixing them in those repos is outside this skill.
 
 ### Version
 
 The calculators ship in lockstep with Dradis, so the new gem targets the **next
-Dradis release**, not whatever the siblings currently say:
+Dradis release**, not whatever the siblings currently say. Read the latest
+version from CVSS's CHANGELOG and check whether it has been released:
 
 ```bash
 cd ../dradis-calculator_cvss
 git fetch --tags
-head -1 CHANGELOG.md        # e.g. v5.4.0 (September 2026)
-git tag -l 'v5.4.0'         # tagged => released => target v5.5.0
+head -1 CHANGELOG.md     # vX.Y.Z (Month YYYY)
+git tag -l 'vX.Y.Z'      # listed => released => target vX.(Y+1).0
 ```
 
-If the top CHANGELOG header is already tagged, target the next minor;
-otherwise target that header's version. If the host's release branches
-(`release-X.Y.Z`) disagree, ask.
+If that version is tagged, target the next minor; otherwise target that
+version. If the host's `release-X.Y.Z` branches disagree, ask.
 
-`gem_version.rb` and the CHANGELOG header must carry **the same version** —
-dradis-calculator_aivss-ssvc merged with `5.3.0` in one and `v5.4.0` in the
-other.
-
-```ruby
-module Dradis
-  module Plugins
-    module Calculators
-      module {Module}
-        # Returns the version of the currently loaded {NAME} calculator as a
-        # <tt>Gem::Version</tt>
-        def self.gem_version
-          Gem::Version.new VERSION::STRING
-        end
-
-        module VERSION
-          MAJOR = 5
-          MINOR = 5
-          TINY = 0
-          PRE = nil
-
-          STRING = [MAJOR, MINOR, TINY, PRE].compact.join('.')
-        end
-      end
-    end
-  end
-end
-```
-
-`version.rb` is the sibling's `version.rb` with the names substituted
-(`require_relative 'gem_version'`, `def self.version; gem_version; end`).
-
-`CHANGELOG.md`:
+`MAJOR`/`MINOR`/`TINY` in `gem_version.rb` and the CHANGELOG header carry
+**the same version**:
 
 ```
-v5.5.0 (Month YYYY)
+vX.Y.Z (Month YYYY)
   - Calculator: Add {NAME} calculator
 ```
-
-### Cruft in the older calculators
-
-These are present in CVSS, DREAD and/or MITRE as of v5.4.0. Do not carry any
-of them into the new gem. Fixing them in those repos is outside this skill.
-
-| Cruft | Where |
-|---|---|
-| `.github/issue_template.md` | CVSS, DREAD, MITRE |
-| CONTRIBUTING link to `dradis/dradisframework` | CVSS, DREAD, MITRE |
-| Commented `dradis_core` / `dradisframework` lines in `Gemfile` | DREAD, MITRE |
-| `# s.add_dependency 'rails', '~> 4.1.1'` in the gemspec | DREAD, MITRE |
-| `rake '~> 10.0'` | CVSS, DREAD, MITRE |
-| `$:.push File.expand_path('../lib', __FILE__)` in the gemspec | all |
-| Double-quoted `join(".")` in `gem_version.rb` | all |
-| Client-side `#[Field]#` building in JS | CVSS, DREAD, MITRE |
 
 ## Naming
 
@@ -414,8 +299,7 @@ FIELDS = FIELD_NAMES.map { |name| "#{FIELD_PREFIX}.#{name}".freeze }.freeze
 
 **`FIELD_PREFIX` and `VECTOR_FIELD` are the only spelling of the prefix in the
 gem.** Controllers, views, the engine's settings defaults and the JS read them
-from `V1`. The merged AIVSS-SSVC repeats `'AIVSS-SSVC.'` in its controller and
-views; don't.
+from `V1`.
 
 ### V1 is the only source of truth — including for the browser
 
@@ -560,18 +444,29 @@ does not depend on the order the pairs were written in:
 
 ```ruby
 VECTOR_PAIR_SEPARATOR = '/'.freeze
+VECTOR_KEY_SEPARATOR = ':'.freeze
 
 def self.selection_from_vector(vector)
   return if vector.blank?
 
-  pairs = vector.split(VECTOR_PAIR_SEPARATOR).to_h { |pair| pair.split(':', 2) }
-  return unless INPUTS.all? { |input| valid_option?(input, pairs[input[:id]]) }
+  pairs = vector.split(VECTOR_PAIR_SEPARATOR).map { |pair| pair.split(VECTOR_KEY_SEPARATOR, 2) }
+  return unless pairs.all? { |pair| pair.size == 2 }
+
+  pairs = pairs.to_h
+  return unless INPUTS.all? { |input| option_key?(input[:options], pairs[input[:id]]) }
 
   INPUTS.to_h { |input| [input[:id], pairs[input[:id]]] }
 end
+
+def self.option_key?(options, key)
+  options.any? { |option| option[:key] == key }
+end
+private_class_method :selection_from_vector, :option_key?
 ```
 
-Anything invalid returns `nil` and the caller falls back.
+Anything invalid returns `nil` and the caller falls back. Check pair length
+before `to_h`, because a pair without a separator makes `to_h` raise. The JS writes the
+vector, so both separators also travel in `FRONTEND_CONFIG`.
 
 **Individual fields** (MITRE) — rebuild from the separate issue fields,
 falling back per field so a partially scored issue still opens on a usable
@@ -602,7 +497,7 @@ the client, where it drifts from the Ruby that parses it back.
 
 ```ruby
 def self.field_output(values = {}, fields: FIELDS)
-  (FIELDS & fields).map do |field|
+  (FIELDS & (fields | [VECTOR_FIELD])).map do |field|
     value = values[field]
     value = 'N/A' if value.blank?
     "#[#{field}]#\n#{value}"
@@ -610,9 +505,9 @@ def self.field_output(values = {}, fields: FIELDS)
 end
 ```
 
-`FIELDS & fields` filters to the requested subset and forces `FIELDS` order,
-so a client cannot reorder or inject field names. With a picker, merge
-`VECTOR_FIELD` into `fields` here so it cannot be switched off.
+`FIELDS & …` filters to the requested subset and forces `FIELDS` order, so a
+client cannot reorder or inject field names. `| [VECTOR_FIELD]` keeps the
+vector in the output whatever the picker sends.
 
 ## Controllers
 
@@ -906,64 +801,55 @@ enforces the ones marked **(rubocop)**; the rest are on you.
   never invites users to edit the model owner's values in the gem source.
 - The README records the source URL, and for vendored code its version.
 
-## Specs
+## Specs (only if the user asks)
 
-The gem ships `spec/models/dradis/plugins/calculators/{path}/v1_spec.rb`. The
-older calculators ship none, but the add-on CI planned for dradis-ce runs each
-add-on's `spec/` from the host — and a calculator with nothing to run proves
-nothing.
+No calculator ships specs, so the new one doesn't by default. The checks below
+run during the port, in the harness. In the report, offer to ship them as specs.
 
-The spec uses the host's `rails_helper`, the same as other host-mode add-ons:
+If the user says yes, add `spec/models/dradis/plugins/calculators/{path}/v1_spec.rb`.
+It uses the host's `rails_helper`, as host-mode add-ons do, and reads fixtures
+captured from the calculator's own output during the smoke test:
 
 ```ruby
 require 'rails_helper'
 
 describe Dradis::Plugins::Calculators::{Module}::V1 do
-  describe '.field_output' do
-    it 'writes the requested fields in FIELDS order' do
-      fields = described_class::FIELDS.last(2).reverse
-      output = described_class.field_output({}, fields: fields)
-
-      expect(output.scan(/#\[(.+?)\]#/).flatten).to eq(fields.reverse)
-    end
-
-    it 'drops field names outside FIELDS' do
-      expect(described_class.field_output({}, fields: ['Evil.Field'])).to eq('')
-    end
-  end
+  let(:fixtures) { Dradis::Plugins::Calculators::{Module}::Engine.root.join('spec/fixtures') }
 
   describe '.selection_from_fields' do
-    it 'restores a selection from its own saved output' do
-      # every input set to a non-default option, saved, parsed back
+    it 'restores the selection the calculator saved' do
+      saved_fields = fixtures.join('saved_output.txt').read
+        .scan(FieldParser::FIELDS_REGEX)
+        .to_h { |name, value| [name.strip, value.strip] }
+      saved_selection = JSON.parse(fixtures.join('saved_selection.json').read)
+
+      expect(described_class.selection_from_fields(saved_fields)).to eq(saved_selection)
     end
 
     it 'falls back to DEFAULTS on a malformed vector' do
-      expect(described_class.selection_from_fields(described_class::VECTOR_FIELD => 'garbage'))
-        .to eq(described_class::DEFAULTS)
+      fields = { described_class::VECTOR_FIELD => 'not-a-vector' }
+
+      expect(described_class.selection_from_fields(fields)).to eq(described_class::DEFAULTS)
+    end
+  end
+
+  describe '.field_output' do
+    it 'writes the requested fields in FIELDS order' do
+      requested = described_class::FIELDS.last(2).reverse
+      written = described_class.field_output({}, fields: requested).scan(/#\[(.+?)\]#/).flatten
+
+      expect(written & requested).to eq(requested.reverse)
+    end
+
+    it 'drops field names outside FIELDS' do
+      expect(described_class.field_output({}, fields: ['Unknown.Field'])).not_to include('Unknown.Field')
     end
   end
 end
 ```
 
-Cover at least:
-
-- **Constants** — `V1`'s values against the source. Capture what you extracted
-  from the source to `spec/fixtures/reference.json` during the port and assert
-  against it, so a later edit to `V1` that diverges fails. (Vendored tables
-  need no constants spec; there is nothing transcribed.)
-- **Round-trip** — every input at a non-default value, through `field_output`,
-  through `FieldParser::FIELDS_REGEX`, through `selection_from_fields`, equal to
-  the start.
-- **Fallback** — blank, malformed and partial values restore to `DEFAULTS`
-  per field instead of raising.
-- **`field_output`** — order, filtering, `N/A` for blanks, vector always present
-  if there is a picker.
-- **"Not defined"** values survive the round-trip.
-
-Scoring that lives in the JS is covered by the port verification below, not by
-these specs; say so in the report.
-
-Run from the host:
+`saved_output.txt` is the field output from a save made with every input at a
+non-default value; `saved_selection.json` is that selection. Run from the host:
 
 ```bash
 cd ../dradis-ce
@@ -1003,6 +889,15 @@ plainly that no oracle existed.
 
 **Structural checks, at every tier:**
 
+- **Constants** — parse the source and assert programmatically that `V1`'s
+  values match it: option values, labels, thresholds, defaults. Catches a
+  mistyped lookup cell that no formula test will. (Nothing to check for
+  vendored tables.)
+- **Round-trip** — every input at a non-default value, through
+  `field_output`, through `FieldParser::FIELDS_REGEX`, through
+  `selection_from_fields`, equal to the start. Blank, malformed and partial
+  values fall back instead of raising; "not defined" values survive.
+
 - **Boundary enumeration** — enumerate every distinct value each derived
   quantity can reach rather than sampling; it is the only way to guarantee no
   threshold is skipped.
@@ -1014,8 +909,8 @@ For a dataset-backed calculator: every taxonomy node resolves, IDs and names
 match upstream, dependent selects populate, the asset parses into the shape
 the JS expects.
 
-The harness lives outside the gem (scratch directory); only the Ruby specs
-ship.
+The harness lives outside the gem, in a scratch directory. Run the Ruby-side
+checks against `V1` with `bin/rails runner` in the host.
 
 ## Lint
 
@@ -1035,7 +930,7 @@ any calculator you read, and their field prefixes.
 
 ## Smoke test in the host
 
-The specs and the harness never boot the engine. This does, and it is the only
+The harness never boots the engine. This does, and it is the only
 thing that catches inflection, routing, asset and view-hook mistakes.
 
 1. Point the host at the gem. `Gemfile.plugins` is gitignored and the new gem
@@ -1052,7 +947,6 @@ thing that catches inflection, routing, asset and view-hook mistakes.
    bin/rails zeitwerk:check
    bin/rails routes -g {path}
    bin/rails runner 'p Dradis::Plugins::Calculators::{Module}::Engine.enabled?'
-   bundle exec rspec ../dradis-calculator_{name}/spec
    ```
 
    `zeitwerk:check` must pass; `routes` must list `calculators_{path}`,
