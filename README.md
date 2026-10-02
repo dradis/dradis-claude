@@ -75,7 +75,7 @@ The skill will:
 
 ### `/dradis-core:calculator`
 
-Create a Dradis risk calculator add-on (a `dradis-calculator_*` gem) from a scoring model — a reference calculator, a published spec, a taxonomy feed, or a scoring table.
+Create a Dradis risk calculator add-on (a `dradis-calculator_*` gem) from a reference calculator or published scoring model.
 
 **Usage:**
 
@@ -85,12 +85,13 @@ Create a Dradis risk calculator add-on (a `dradis-calculator_*` gem) from a scor
 
 The skill will:
 1. Classify the source — vendoring the model owner's own implementation where one exists, transcribing it where one doesn't
-2. Classify the model's shape (discrete metrics, numeric scales, taxonomy, lookup table, multi-version) to pick the UI and which calculator to clone
-3. Build the gem, available at both the instance level and on each issue
-4. Verify at the strongest tier the source allows — differential against a runnable reference, published test vectors, or hand-derived cases
-5. Wire the gem into `dradis-ce`'s Gemfile
+2. Classify the model's shape (discrete metrics, numeric scales, taxonomy, lookup table, multi-version) to pick the UI
+3. Scaffold the gem from current boilerplate templates and build it, available at both the instance level and on each issue
+4. Verify at the strongest tier the source allows, and ship `V1` specs that run from the host
+5. Lint with the host's rubocop config and smoke-test the engine booted in the host
+6. Report the verification tier and the defaults taken
 
-**Produces:** A new `dradis-calculator_{name}/` sibling directory, ready to mount.
+**Produces:** A new `dradis-calculator_{name}/` sibling directory that boots in Dradis, passes lint, and ships specs.
 
 
 ## Samples

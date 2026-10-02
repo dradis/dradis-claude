@@ -1,23 +1,24 @@
 # Dradis Risk Calculator Reference
 
 Everything a `dradis-calculator_*` add-on needs: the file layout, the
-conventions each file follows, the naming traps, the patterns for vendored
-code and external datasets, and how to verify the result.
+boilerplate, the conventions each file follows, the naming traps, the patterns
+for vendored code and external datasets, and how to verify, lint and smoke-test
+the result.
 
 Throughout, `{name}` is the kebab-case calculator name; the examples below
 use `aivss-ssvc` to make the substitutions concrete. So `{name}` is
 `aivss-ssvc`, `{path}` its underscored form used in file paths and routes
-(`aivss_ssvc`), `{Module}` the Ruby module (`AIVSSSSVC`), and `{PREFIX}` the
-issue field prefix (`AIVSS-SSVC`).
+(`aivss_ssvc`), `{Module}` the Ruby module (`AIVSSSSVC`), `{PREFIX}` the
+issue field prefix (`AIVSS-SSVC`) and `{NAME}` the display name.
 
 ## File layout
 
 ```
 dradis-calculator_{name}/
 ├── dradis-calculator_{name}.gemspec
-├── CHANGELOG.md                     # one entry for the new calculator
-├── README.md
-├── Gemfile  Rakefile  LICENSE  CONTRIBUTING.md  .gitignore  .github/
+├── CHANGELOG.md  CHANGELOG.template  README.md  LICENSE  CONTRIBUTING.md
+├── Gemfile  Rakefile  .gitignore
+├── .github/pull_request_template.md   # no issue_template.md
 ├── config/
 │   └── routes.rb
 ├── lib/
@@ -26,10 +27,12 @@ dradis-calculator_{name}/
 │       ├── engine.rb
 │       ├── gem_version.rb
 │       └── version.rb
+├── spec/
+│   └── models/dradis/plugins/calculators/{path}/v1_spec.rb
 └── app/
     ├── models/dradis/plugins/calculators/{path}/v1.rb
     ├── controllers/dradis/plugins/calculators/{path}/
-    │   ├── base_controller.rb        # instance level
+    │   ├── base_controller.rb        # instance level + shared fields endpoint
     │   └── issues_controller.rb      # issue level
     ├── views/
     │   ├── dradis/plugins/calculators/{path}/
@@ -48,8 +51,173 @@ dradis-calculator_{name}/
         └── stylesheets/dradis/plugins/calculators/{path}/
             ├── _{path}.scss                  # the actual rules
             ├── base.css.scss                 # standalone page manifest
-            └── manifests/hera.scss            # in-app manifest
+            └── manifests/hera.scss           # in-app manifest
 ```
+
+## Boilerplate
+
+Write these from the templates below. **Do not copy them from an older
+calculator** — CVSS, DREAD and MITRE still carry cruft that review has already
+rejected once (see "Cruft in the older calculators").
+
+### `dradis-calculator_{name}.gemspec`
+
+```ruby
+require_relative 'lib/dradis/plugins/calculators/{path}/version'
+
+Gem::Specification.new do |spec|
+  spec.platform = Gem::Platform::RUBY
+  spec.name = 'dradis-calculator_{name}'
+  spec.version = Dradis::Plugins::Calculators::{Module}::VERSION::STRING
+  spec.summary = 'This plugin adds a {NAME} score calculator to Dradis.'
+  spec.description = 'Display a {NAME} calculator in Dradis Framework.'
+
+  spec.license = 'GPL-2'
+
+  spec.authors = ['Dradis Team']
+  spec.homepage = 'https://dradis.com/support/guides/projects/calculators.html'
+
+  spec.files = Dir.chdir(File.expand_path(__dir__)) do
+    Dir['{app,config,db,lib}/**/*', 'CHANGELOG.md', 'LICENSE', 'Rakefile', 'README.md']
+  end
+
+  spec.add_dependency 'dradis-plugins', '>= 4.0'
+
+  spec.add_development_dependency 'bundler', '~> 2.0'
+  spec.add_development_dependency 'rake'
+end
+```
+
+- `spec.files` is a `Dir` glob, not `` `git ls-files` `` — the gem must build
+  without a git repo (CVSS `44282c4` "Avoid Git dependency in gemspec").
+  Vendored assets under `app/` are picked up by the glob; anything outside
+  the listed roots (e.g. `scripts/`) is deliberately not shipped.
+- `rake` is unpinned. The older calculators pin `~> 10.0`, which only allows
+  rake versions affected by CVE-2020-8130.
+- No `executables`/`test_files` lines: the gem has no `bin/`, and `spec/` is
+  outside the glob.
+- No commented-out dependency notes.
+
+### `Gemfile`
+
+```ruby
+source 'https://rubygems.org'
+
+gemspec
+```
+
+Nothing else — no commented-out `dradis_core`/`dradisframework` lines.
+
+### `Rakefile`
+
+```ruby
+require 'bundler/gem_tasks'
+```
+
+### `.gitignore`
+
+```
+# Bundler config
+Gemfile.lock
+/.bundle/
+/vendor/bundle/
+
+# Gem artifacts
+/pkg/
+```
+
+No leading blank line.
+
+### `CONTRIBUTING.md`
+
+```markdown
+# Plugin contribution guidelines
+
+See the Dradis Framework's [CONTRIBUTING.md](https://github.com/dradis/dradis-ce/blob/master/CONTRIBUTING.md)
+```
+
+`dradis-ce`, not `dradisframework`.
+
+### `.github/`
+
+Only `pull_request_template.md`, copied from `dradis-calculator_aivss-ssvc`.
+**No `issue_template.md`** — Dradis keeps one tracker, on dradis-ce, not one
+per add-on.
+
+### `LICENSE`, `CHANGELOG.template`
+
+Copy verbatim from `dradis-calculator_aivss-ssvc`.
+
+### Version
+
+The calculators ship in lockstep with Dradis, so the new gem targets the **next
+Dradis release**, not whatever the siblings currently say:
+
+```bash
+cd ../dradis-calculator_cvss
+git fetch --tags
+head -1 CHANGELOG.md        # e.g. v5.4.0 (September 2026)
+git tag -l 'v5.4.0'         # tagged => released => target v5.5.0
+```
+
+If the top CHANGELOG header is already tagged, target the next minor;
+otherwise target that header's version. If the host's release branches
+(`release-X.Y.Z`) disagree, ask.
+
+`gem_version.rb` and the CHANGELOG header must carry **the same version** —
+dradis-calculator_aivss-ssvc merged with `5.3.0` in one and `v5.4.0` in the
+other.
+
+```ruby
+module Dradis
+  module Plugins
+    module Calculators
+      module {Module}
+        # Returns the version of the currently loaded {NAME} calculator as a
+        # <tt>Gem::Version</tt>
+        def self.gem_version
+          Gem::Version.new VERSION::STRING
+        end
+
+        module VERSION
+          MAJOR = 5
+          MINOR = 5
+          TINY = 0
+          PRE = nil
+
+          STRING = [MAJOR, MINOR, TINY, PRE].compact.join('.')
+        end
+      end
+    end
+  end
+end
+```
+
+`version.rb` is the sibling's `version.rb` with the names substituted
+(`require_relative 'gem_version'`, `def self.version; gem_version; end`).
+
+`CHANGELOG.md`:
+
+```
+v5.5.0 (Month YYYY)
+  - Calculator: Add {NAME} calculator
+```
+
+### Cruft in the older calculators
+
+These are present in CVSS, DREAD and/or MITRE as of v5.4.0. Do not carry any
+of them into the new gem. Fixing them in those repos is outside this skill.
+
+| Cruft | Where |
+|---|---|
+| `.github/issue_template.md` | CVSS, DREAD, MITRE |
+| CONTRIBUTING link to `dradis/dradisframework` | CVSS, DREAD, MITRE |
+| Commented `dradis_core` / `dradisframework` lines in `Gemfile` | DREAD, MITRE |
+| `# s.add_dependency 'rails', '~> 4.1.1'` in the gemspec | DREAD, MITRE |
+| `rake '~> 10.0'` | CVSS, DREAD, MITRE |
+| `$:.push File.expand_path('../lib', __FILE__)` in the gemspec | all |
+| Double-quoted `join(".")` in `gem_version.rb` | all |
+| Client-side `#[Field]#` building in JS | CVSS, DREAD, MITRE |
 
 ## Naming
 
@@ -63,24 +231,16 @@ dradis-calculator_{name}/
 | Issue fields | `{PREFIX}.FieldName` | `AIVSS-SSVC.RiskScore` |
 
 **Routes use underscores.** dradis-ce's own `config/routes.rb` has no
-hyphenated path segments. Underscoring also lets Rails auto-generate the
-route names, so no explicit `as:` is needed anywhere.
+hyphenated path segments, and underscoring lets Rails generate the route names
+without any `as:`.
 
 ### Acronym names and where the inflections go
 
 The existing calculators use all-caps modules (`CVSS`, `DREAD`, `MITRE`) and
-register `inflect.acronym` so Zeitwerk can map the directory name back to the
-constant. This extends to two acronyms joined by an underscore — the joined
-form round-trips as long as both acronyms are registered:
-
-```ruby
-"aivss_ssvc".camelize     # => "AIVSSSSVC"
-"AIVSSSSVC".underscore    # => "aivss_ssvc"
-```
-
-so `AIVSSSSVC` is a working module name, and that is what
-`dradis-calculator_aivss-ssvc` ships. Check whatever you pick round-trips
-before committing to it:
+register `inflect.acronym` so Zeitwerk can map the directory back to the
+constant. Two acronyms joined by an underscore round-trip too, as long as both
+are registered (`"aivss_ssvc".camelize # => "AIVSSSSVC"` and back). Check
+whatever you pick before committing to it:
 
 ```bash
 ruby -e 'require "active_support/all"
@@ -90,16 +250,14 @@ ruby -e 'require "active_support/all"
 ```
 
 **Register the inflections in exactly one place: `lib/dradis-calculator_{name}.rb`,
-before `engine.rb` is required.** This is a timing constraint, not a style
-preference. `isolate_namespace` underscores the module name at *require* time,
-so the acronyms have to already exist — an engine initializer runs far too
-late, and having them in both files is a duplicate that will drift:
+before `engine.rb` is required.** `isolate_namespace` underscores the module
+name at *require* time, so an engine initializer is too late:
 
 ```ruby
 require 'dradis-plugins'
 
-# Single source of truth. Must run before requiring engine.rb: isolate_namespace
-# underscores the module name at require time, so both acronyms need to exist already.
+# Must run before requiring engine.rb: isolate_namespace underscores the
+# module name at require time, so both acronyms need to exist already.
 ActiveSupport::Inflector.inflections do |inflect|
   inflect.acronym('AIVSS')
   inflect.acronym('SSVC')
@@ -118,10 +276,10 @@ require 'dradis/plugins/calculators/aivss_ssvc/engine'
 require 'dradis/plugins/calculators/aivss_ssvc/version'
 ```
 
-Registering acronyms is global — it changes `camelize`/`underscore` everywhere
-in the host app. A plain CamelCase module (`AivssSsvc`) round-trips with **no**
-inflection registration at all and is the lighter option; use it when the name
-is not genuinely an acronym. When it is one, match the siblings and register.
+Acronyms are global — they change `camelize`/`underscore` across the host. A
+plain CamelCase module (`AivssSsvc`) needs no registration; use it when the
+name is not genuinely an acronym. `bin/rails zeitwerk:check` in the host (see
+"Smoke test in the host") is the proof either way.
 
 ## The engine
 
@@ -156,23 +314,21 @@ module Dradis::Plugins::Calculators::{Module}
 end
 ```
 
-No `inflections` initializer belongs here — see "Acronym names and where the
-inflections go" above; by the time an engine initializer runs,
-`isolate_namespace` has already needed them.
-
-`enabled?` comes from `Dradis::Plugins::Base` and defaults to true, so most
-calculators need no `addon_settings` block at all. Add one only if the
-calculator has a setting worth exposing in the Configuration Manager — an
-optional field picker is one reason, not a required one:
+`enabled?` comes from `Dradis::Plugins::Base` and defaults to true. Add an
+`addon_settings` block only if there is a setting worth exposing in the
+Configuration Manager (the field picker's defaults are the usual one):
 
 ```ruby
 addon_settings :{path} do
-  settings.default_fields = '{PREFIX}.Likelihood,{PREFIX}.RiskScore'
+  settings.default_fields = "#{V1::FIELD_PREFIX}.Likelihood,#{V1::FIELD_PREFIX}.RiskScore"
 end
 ```
 
-`description` matters beyond documentation: `render_view_hooks` sorts add-ons
-by it, which fixes the order of the Tools menu entries.
+`settings.default_fields =` sets the default for the `fields` key, read back as
+`Engine.settings.fields`.
+
+`description` sorts the add-ons in `render_view_hooks`, which fixes the order
+of the Tools menu entries.
 
 ## Routes
 
@@ -193,111 +349,86 @@ end
 ```
 
 Yields `calculators_{path}_path`, `calculators_{path}_fields_path` and
-`{path}_project_issue_path`. The last is what
-`simple_form_for [:{path}, current_project, @issue]` resolves to.
-
-The `fields` endpoint is what renders the issue-field output; see "Field
-output is rendered server-side" below. Both levels post to it — it is not
-project-scoped, so there is one route rather than one per level.
-
-**Do not pad routes into columns.** `get`/`patch`/`post` line up on their own;
-adding spaces to align the paths makes every later edit a realignment.
+`{path}_project_issue_path` (what `simple_form_for [:{path}, current_project, @issue]`
+resolves to). The `fields` endpoint is not project-scoped, so both levels post
+to the one route.
 
 ## The model (`V1`)
 
 One class holding every definition taken from the source. Views iterate over
-it and the JS never restates any of it. Its *shape* follows the model's shape
-— there is no single schema to copy.
+it and the JS never restates any of it. Its shape follows the model's shape.
 
-**Discrete-option metrics.** A list per metric, each option carrying its key,
+**Discrete-option metrics.** A list per metric; each option carries its key,
 label and numeric value:
 
 ```ruby
-METRICS = [
-  { key: 'AV', name: 'Attack Vector', options: [
-    { key: 'N', label: 'Network', value: 0.85 },
-    { key: 'A', label: 'Adjacent', value: 0.62 }
-  ] }
+THREAT_LEVELS = [
+  { key: 'none', label: 'None', value: 0.2 },
+  { key: 'poc', label: 'Public PoC', value: 0.5 },
+  { key: 'active', label: 'Active', value: 0.9 }
 ].freeze
 ```
 
 **Numeric scales.** The scale bounds and the text for each step; DREAD renders
-these as radio rows with the guidance in the table cells.
+these as radio rows with the guidance in the table cells. Keep the bounds as
+constants — validation code (`/\A[1-5]\z/`) restating them is a second copy.
 
-**Hierarchical taxonomy.** Little or nothing in `V1` beyond the field list —
-the data lives in a JSON asset (see "External datasets"). `V1` holds only the
-field names the selects write to.
+**Hierarchical taxonomy.** Little beyond the field list — the data lives in a
+JSON asset (see "External datasets").
 
 **Lookup table or matrix.** Keep the table verbatim, ideally vendored rather
 than retyped; `V1` holds the axis definitions that index into it. Expose which
-cell was hit, not just its value — a reader checking a 5×5 matrix wants to see
-the row and column.
-
-**Decision tree.** `V1` holds the nodes: each question, its options, and for
-each option either the next question or a terminal outcome.
-
-```ruby
-NODES = {
-  'exploitation' => {
-    question: '...',
-    options: [
-      { key: 'active', label: 'Active', next: 'automatable' },
-      { key: 'none',   label: 'None',   outcome: 'Defer' }
-    ]
-  }
-}.freeze
-```
-
-No shipped calculator has this shape yet, so there is no house UI to copy —
-whether the questions reveal progressively or all at once is a decision to take
-from the reference and state, not one this file settles. What does hold: the
-**path** is part of the result, so record it as an output field and let a
-reader audit how the outcome was reached. Restoring state means replaying the
-path, so validate that a saved path is still walkable — a tree revision can
-strand an old one, and it must fall back rather than raise.
+cell was hit, not just its value.
 
 **"Not defined" values.** Most published models have a skip value with defined
 semantics (CVSS's `X` means "use the default weight", not zero). Give it a real
 option key, keep it out of the arithmetic the way the source does, and make
 sure it survives a save/reload.
 
-Whatever the shape, a small amount of extra structure pays off: tie each
-control to its options, its labels **and** its issue field(s) in one place, so
-views become pure markup and state restoration can loop rather than repeat
-field names:
+Tie each control to its options, its label **and** its issue field(s) in one
+place, so views are pure markup and state restoration can loop:
 
 ```ruby
 INPUTS = [
-  { id: 'severity', field: '{PREFIX}.Severity', label: '...', options: SEVERITY_LEVELS }
+  {
+    id: 'threat',
+    field: "#{FIELD_PREFIX}.Threat",
+    label: 'P(Threat): exploitation state',
+    options: THREAT_LEVELS
+  }
 ].freeze
 ```
 
-Also in `V1`: the state the reference loads with (`DEFAULTS`), and the issue
-field list:
+Also in `V1`: the state the reference loads with (`DEFAULTS`), and the field
+names:
 
 ```ruby
-FIELD_NAMES = %i[ ... ].freeze
-FIELDS = FIELD_NAMES.map { |name| "{PREFIX}.#{name}".freeze }.freeze
+FIELD_PREFIX = '{PREFIX}'.freeze
+VECTOR_FIELD = "#{FIELD_PREFIX}.Vector".freeze
+
+FIELD_NAMES = %i[Vector Score Verdict ...].freeze
+FIELDS = FIELD_NAMES.map { |name| "#{FIELD_PREFIX}.#{name}".freeze }.freeze
 ```
 
 `%i[]` handles dotted names: `%i[Base.Score]` gives `:"Base.Score"`.
 
+**`FIELD_PREFIX` and `VECTOR_FIELD` are the only spelling of the prefix in the
+gem.** Controllers, views, the engine's settings defaults and the JS read them
+from `V1`. The merged AIVSS-SSVC repeats `'AIVSS-SSVC.'` in its controller and
+views; don't.
+
 ### V1 is the only source of truth — including for the browser
 
-The JS must not restate a single definition from `V1`. That covers the obvious
-ones (option values, thresholds, defaults) and the ones it is tempting to keep
-"just in the UI" — outcome matrices, badge class names, timeline copy, help
-text. Two copies of a lookup table is two things to update and one of them
-will be missed.
-
-Serialize what the browser needs as **one** constant and hand it over as a
-single data attribute:
+The JS restates no definition from `V1`: not option values, thresholds or
+defaults, and not the things that feel like UI — outcome matrices, badge
+classes, verdict copy, help text, field names. Serialize what the browser needs
+as **one** constant and pass it as a single data attribute:
 
 ```ruby
 FRONTEND_CONFIG = {
   outcomeMatrix: OUTCOME_MATRIX,
-  timelineByOutcome: TIMELINE_BY_OUTCOME,
-  badgeClass: BADGE_CLASS
+  badgeClass: BADGE_CLASS,
+  vectorField: VECTOR_FIELD
 }.freeze
 ```
 
@@ -309,161 +440,69 @@ FRONTEND_CONFIG = {
 >
 ```
 
-```js
-const config = JSON.parse(root.dataset.{path}Config);
-this.outcomeMatrix = config.outcomeMatrix;
-```
-
-Use camelCase keys inside `FRONTEND_CONFIG` — it is a JS object once it lands,
-and it should read like one. Render the attribute in **both** entry views so
-the two levels get identical definitions.
-
-Per-option data that a view already renders (an option's numeric value, its
-label, its issue field) belongs on that element as a `data-` attribute rather
-than in the config blob; the JS reads it off the selected element. Reserve the
-blob for whole tables and maps that have no single element to hang off.
-
-Issue field names count as definitions too. If the JS writes a computed value
-under a field name, that name comes from `V1` — either off a `data-field`
-attribute or through the config blob — never as a string literal in the JS. A
-literal there is a second copy of `FIELD_NAMES` that no one will remember to
-update.
+camelCase keys — it is a JS object once it lands. Render the attribute in
+**both** entry views. Per-option data a view already renders (an option's
+value, label or field) goes on that element as a `data-` attribute; reserve the
+blob for whole tables and maps.
 
 #### When the model is rules, not a table
 
-Some models classify by ordered predicates rather than by lookup: *any axis
-above X, else two or more above Y, else all below Z, else a tie-break.* That
-does not serialize to JSON without inventing a rule language, and trying is
-worse than not bothering.
-
-Split it instead. Every **value** the predicates test against, and every label,
-multiplier or explanatory string they return, goes in `V1` and travels in the
-config blob. Only the **branch order** stays in the JS, where it reads as the
-control flow it is:
+Some models classify by ordered predicates (*any axis above X, else two or more
+above Y, else …*). That does not serialize to JSON without inventing a rule
+language, so split it: every **value** the predicates test against and every
+label or string they return goes in `V1` and travels in the config blob; only
+the **branch order** stays in the JS.
 
 ```ruby
-# In V1: the numbers and the strings.
 AGENT_THRESHOLDS = {
   primemover: 4.0,
   specialist: 3.0,
   copilot: 2.5
 }.freeze
-
-AGENT_LEVELS = {
-  primemover: { label: 'Prime Mover', exposure: 8, rationale: '...' },
-  specialist: { label: 'Specialist', exposure: 4, rationale: '...' },
-  copilot: { label: 'Copilot', exposure: 2, rationale: '...' }
-}.freeze
 ```
 
 ```js
-// In the JS: only the order, and it is the reference's order.
+// Only the order, and it is the reference's order.
 classifyAgent(...averages) {
   const thresholds = this.agentThresholds;
 
   if (averages.some((avg) => avg >= thresholds.primemover)) return this.agent('primemover');
   if (averages.filter((avg) => avg >= thresholds.specialist).length >= 2) return this.agent('specialist');
-  if (averages.every((avg) => avg < thresholds.copilot)) return this.agent('copilot');
-  // ... tie-break
+  // ...
 }
 ```
 
-The test for whether you have split it correctly: **grep the JS for numeric
-literals and for user-visible strings.** Neither should appear in the scoring
-path. Comparison operators and branch order should be all that is left.
-
-When you refactor an existing calculator this way, the branch order and the
-comparisons must come through unchanged — `>=` must not become `>`, and the
-rules must still be tested in the same sequence, because an earlier rule
-shadows a later one. Enumerate every reachable input and diff the old
-classification against the new one before and after; the input space for a
-classifier over a few averages is small enough to cover exhaustively.
-
-### Ruby formatting
-
-- **No alignment padding.** Never pad keys, `=>`, or values into columns —
-  not in a hash, not in a constant, not in the routes file. One space after
-  the key. Aligned code turns every subsequent edit into a realignment diff,
-  and the realignment buries the actual change in review.
-- **Multiline hashes when an entry has more than a couple of keys.** An option
-  carrying `key`, `label`, `value` and `description` gets one key per line:
-
-  ```ruby
-  THREAT_LEVELS = [
-    {
-      key: 'none',
-      label: 'None',
-      value: 0.2,
-      description: 'No evidence of exploitation or public proof of concept.'
-    },
-    {
-      key: 'poc',
-      label: 'Public PoC',
-      value: 0.5,
-      description: 'A public proof of concept or known exploitation method exists.'
-    }
-  ].freeze
-  ```
-
-  A short two- or three-key entry stays on one line. Do not mix the two styles
-  within one constant.
-- **`DEFAULTS` follows the same rule** — a flat hash, no padding:
-
-  ```ruby
-  DEFAULTS = {
-    'threat' => 'poc',
-    'vulnerability' => 'moderate',
-    'impact' => 'critical',
-    'factors' => {
-      'f1' => 4, 'f2' => 4, 'f3' => 4, 'f4' => 4, 'f5' => 3,
-      'f6' => 3, 'f7' => 3, 'f8' => 2, 'f9' => 3, 'f10' => 2
-    }.freeze
-  }.freeze
-  ```
+The check: **grep the scoring path in the JS for numeric literals and
+user-visible strings.** Neither should appear. When refactoring an existing
+calculator into this shape, keep every comparison operator and the branch
+order unchanged, and diff old against new classification over every reachable
+input.
 
 ## Output fields as an interface
 
-The `{PREFIX}.*` fields are consumed by name outside the calculator — kits,
-HTML export templates and issue tables all read them. The `welcome` kit's
-export template does:
+The `{PREFIX}.*` fields are read by name outside the calculator. The `welcome`
+kit's export template colour-codes findings from
+`issue.fields['CVSSv4.BaseScore'].to_f`, and its issue note template lists
+`#[CVSSv4.BaseScore]#` so every new issue carries the slot. So:
 
-```erb
-<%= markup(issue.fields['CVSSv4.BaseScore'], liquid: true) %>
-```
-
-and colour-codes findings from `issue.fields['CVSSv4.BaseScore'].to_f`, while
-the kit's issue note template lists `#[CVSSv4.BaseScore]#` so every new issue
-carries the slot. That makes the field names a contract:
-
-- Write the headline score **bare** — `7.5`, not `7.5/10` or `High (7.5)` —
-  so `.to_f` parses it
-- Keep the human-readable verdict in its **own** field rather than decorating
-  the number
-- Order `FIELDS` the way a reader wants them: identity and score first,
+- Write the headline score **bare** — `7.5`, not `7.5/10` or `High (7.5)`
+- Keep the human-readable verdict in its **own** field
+- Order `FIELDS` the way a reader wants them: vector, score and verdict first,
   individual metrics after
 
-### Renaming is a breaking change
-
-A field name that has shipped is referenced by templates you cannot see. CVSS
-still reads its own legacy name years later:
+**Renaming is a breaking change.** CVSS still reads its legacy name:
 
 ```ruby
 field_value_v3 = @issue.fields['CVSSv3.Vector'] || @issue.fields['CVSSv3Vector']
 ```
 
-If a name must change, read both and write the new one, exactly as above.
-
-This is also why the model class is `V1`. A revision of the scoring model that
-changes what a field *means* wants a `V2` alongside it, with its own field
-namespace, rather than a redefinition that silently changes historical scores.
+If a name must change, read both and write the new one. A model revision that
+changes what a field *means* gets a `V2` with its own namespace.
 
 ## Vendoring an upstream implementation
 
-When the model's owner publishes working code, prefer copying it over
-transcribing it — there is no transcription to get wrong, and upstream fixes
-become a re-copy rather than a re-read.
-
-CVSS is the worked example. It vendors FIRST's own files unmodified:
+When the model's owner publishes working code, copy it rather than transcribe
+it. CVSS vendors FIRST's files unmodified:
 
 ```
 app/assets/javascripts/dradis/plugins/calculators/cvss/
@@ -473,17 +512,15 @@ app/assets/javascripts/dradis/plugins/calculators/cvss/
 └── v4/vendor/{app,cvss_config,cvss_lookup,max_composed,…}.js
 ```
 
-The wrapper does three things only: read the form, call upstream, render the
-result. It contains no scoring logic of its own.
+The wrapper reads the form, calls upstream, renders the result — no scoring
+logic of its own.
 
-Rules for vendored code:
-
-- Keep it **byte-identical** to upstream. Never reformat or "fix" it — that
-  forfeits the whole benefit and makes the next re-copy a merge.
-- Put it under a `vendor/` directory so it is obvious what is not yours.
-- Record the upstream URL and version, so a future update is mechanical.
-- List each file in the asset manifests explicitly, in dependency order.
-- Check the licence permits redistribution before vendoring.
+- **Byte-identical** to upstream. Never reformat or "fix" it.
+- Under a `vendor/` directory (rubocop already excludes `**/vendor/**`).
+- Upstream URL and version recorded in the README, so an update is mechanical.
+- Each file listed in the asset manifests explicitly, in dependency order.
+- Licence checked: redistribution in a GPL-2 gem is not automatic. If it is
+  unclear, stop and ask.
 
 ## External datasets
 
@@ -492,80 +529,76 @@ than fetching upstream at runtime. MITRE is the worked example:
 
 ```
 scripts/download_mitre_data.rb        # fetches upstream, reduces it, writes the asset
-app/assets/data/…/mitre_data.json     # the reduced asset that ships (~148KB)
+app/assets/data/…/mitre_data.json     # the reduced asset that ships
 ```
 
-The script pulls the full upstream feeds, extracts only the fields the
-calculator needs, and writes a compact JSON file. The JS loads it through the
-asset pipeline:
+The JS loads it through the asset pipeline, which makes the calculator file a
+`*.js.erb`:
 
 ```js
 const response = await fetch("<%= asset_path('…/mitre_data.json') %>");
 ```
 
-which requires the calculator file be named `*.js.erb`. Add the JSON to the
-engine's `assets.precompile` list. Commit both the script and its output —
-the script is how the data gets refreshed, the output is what ships.
+Add the JSON to `assets.precompile`. Commit the script and its output.
 
 ## Multi-version models
 
-When the model has versions in active use (CVSS 3.0/3.1/4.0), keep them side
-by side rather than replacing:
-
-- One partial set per version under `base/v3/`, `base/v4/`
-- A `_version_menu.html.erb` select, and a `@version` ivar the controller sets
-  by sniffing which version's fields the issue already carries
-- Separate field namespaces per version (`CVSSv3.*`, `CVSSv4.*`) so an issue
-  scored under one is not misread as the other
-- On update, delete stale fields of the version being replaced
-
-Default a new score to the newest version, but open an existing one on the
-version it was scored with.
+When versions are in active use side by side (CVSS 3.1/4.0): one partial set
+per version (`base/v3/`, `base/v4/`), a `_version_menu.html.erb`, a `@version`
+the controller sets by sniffing which version's fields the issue carries,
+separate field namespaces per version, and stale fields of the replaced version
+deleted on update. New scores default to the newest version; existing ones
+open on the version they were scored with.
 
 ## Restoring saved state
 
-The form must reopen on the score that was saved. Two established patterns:
+The form must reopen on the score that was saved.
 
-**Vector string** (CVSS, DREAD) — when the model defines one. Store it in a
-`{PREFIX}.Vector` field, validate against a `VECTOR_REGEXP`, and redirect
-with an alert when it does not match:
+**Vector string** — the default. If the model defines a vector (CVSS), use it.
+If it does not, define a keyed one (`id:value` pairs joined by `/`), so parsing
+does not depend on the order the pairs were written in:
 
 ```ruby
-if field_value =~ V1::VECTOR_REGEXP
-  field_value.split('/').each { |pair| @vector.store(*pair.split(':')) }
-else
-  redirect_to main_app.project_issue_path(current_project, @issue),
-              alert: 'The format of the Vector field is invalid.'
+VECTOR_PAIR_SEPARATOR = '/'.freeze
+
+def self.selection_from_vector(vector)
+  return if vector.blank?
+
+  pairs = vector.split(VECTOR_PAIR_SEPARATOR).to_h { |pair| pair.split(':', 2) }
+  return unless INPUTS.all? { |input| valid_option?(input, pairs[input[:id]]) }
+
+  INPUTS.to_h { |input| [input[:id], pairs[input[:id]]] }
 end
 ```
 
-**Individual fields** (MITRE) — when the model has no vector. Rebuild from
-the separate issue fields, falling back per-field so a partially scored issue
-still opens on a usable form. Accept both the stored label and the internal
-key, and reject out-of-range values:
+Anything invalid returns `nil` and the caller falls back.
+
+**Individual fields** (MITRE) — rebuild from the separate issue fields,
+falling back per field so a partially scored issue still opens on a usable
+form. Accept both the stored label and the internal key:
 
 ```ruby
 def self.selection_from_fields(issue_fields = {})
   issue_fields ||= {}
-  selection = {}
-  INPUTS.each do |input|
-    selection[input[:id]] =
-      key_for(input[:options], issue_fields[input[:field]]) || DEFAULTS[input[:id]]
-  end
-  selection
+
+  selection_from_vector(issue_fields[VECTOR_FIELD]) ||
+    INPUTS.to_h do |input|
+      [input[:id], key_for(input[:options], issue_fields[input[:field]]) || DEFAULTS[input[:id]]]
+    end
 end
 ```
 
-Test this by feeding the calculator's own saved output back through it.
+**A field picker requires the vector.** If users can deselect fields, the
+individual fields stop being a complete record, and an issue saved with a
+subset cannot be restored. So with a picker: `VECTOR_FIELD` is always written,
+rendered disabled-and-checked in the picker, and preferred by
+`selection_from_fields` (AIVSS-SSVC `b1cbbc0`).
 
 ## Field output is rendered server-side
 
-The `#[Field]#` block the calculator writes into the issue is built by `V1`,
-and the browser asks the server for it. **The JS does not build field output
-itself** — doing so duplicates dradis-ce's `FieldParser` regex and the field
-list on the client, where they drift from the Ruby that has to parse them back.
-
-`V1` owns the rendering:
+`V1` builds the `#[Field]#` block; the browser asks the server for it. The JS
+never builds field output — that duplicates dradis-ce's `FieldParser` regex on
+the client, where it drifts from the Ruby that parses it back.
 
 ```ruby
 def self.field_output(values = {}, fields: FIELDS)
@@ -577,26 +610,20 @@ def self.field_output(values = {}, fields: FIELDS)
 end
 ```
 
-`FIELDS & fields` both filters to the requested subset and forces `FIELDS`
-order, so a client cannot reorder or inject field names.
-
-`BaseController#fields` exposes it over the `POST` route, and the JS replaces
-the textarea contents with the response after every recalculation. Both the
-standalone page and the issue view post to the same endpoint.
+`FIELDS & fields` filters to the requested subset and forces `FIELDS` order,
+so a client cannot reorder or inject field names. With a picker, merge
+`VECTOR_FIELD` into `fields` here so it cannot be switched off.
 
 ## Controllers
 
-`BaseController < ActionController::Base` for the instance page.
-`IssuesController < ::IssuesController` for the issue page, which needs:
-
-```ruby
-skip_before_action :remove_unused_state_param
-```
+`BaseController < ActionController::Base` for the instance page and the shared
+`fields` endpoint. `IssuesController < ::IssuesController` for the issue page,
+with `skip_before_action :remove_unused_state_param`.
 
 ### Strong params, always
 
-**Never read `params[...]` inline in an action.** Every parameter goes through
-a private strong-params method, including the plain-text ones:
+Every parameter goes through a private strong-params method — including arrays
+and plain text — and `V1::FIELDS` is the whitelist:
 
 ```ruby
 class BaseController < ActionController::Base
@@ -606,156 +633,116 @@ class BaseController < ActionController::Base
   end
 
   def fields
-    render plain: V1.field_output({path}_values_params, fields: requested_fields)
+    render plain: V1.field_output(field_values, fields: requested_fields)
   end
 
   private
 
-  def {path}_values_params
-    params.fetch(:values, {}).permit(*V1::FIELDS).to_h
+  def fields_params
+    params.permit(fields: [], values: V1::FIELDS)
+  end
+
+  def field_values
+    fields_params.fetch(:values, {}).to_h
   end
 
   def requested_fields
-    Array(params.fetch(:fields, V1::FIELDS))
+    fields_params.fetch(:fields, V1::FIELDS)
   end
 end
 ```
 
-`permit(*V1::FIELDS)` is the point: the field list is the whitelist, so an
-unknown key cannot reach `set_field`.
-
-The issue-level `update` does the same before parsing the textarea back with
-dradis-ce's own regex:
+The issue-level `update` parses the textarea with dradis-ce's own regex:
 
 ```ruby
 def update
-  {path}_fields = Hash[
-    *{path}_fields_param.scan(FieldParser::FIELDS_REGEX).flatten.map(&:strip)
-  ]
+  {path}_fields = {path}_fields_param
+    .scan(FieldParser::FIELDS_REGEX)
+    .to_h { |name, value| [name.strip, value.strip] }
 
   {path}_fields.each { |name, value| @issue.set_field(name, value) }
 
   # Fields the user deselected are removed rather than left stale.
-  existing_fields = @issue.fields.keys & V1::FIELDS
-  (existing_fields - {path}_fields.keys).each { |name| @issue.delete_field(name) }
+  stale_fields = (@issue.fields.keys & V1::FIELDS) - {path}_fields.keys
+  stale_fields.each { |name| @issue.delete_field(name) }
 
-  # ...
+  if @issue.save
+    redirect_to main_app.project_issue_path(current_project, @issue), notice: '{NAME} fields updated.'
+  else
+    render :edit
+  end
 end
 
 private
 
 def {path}_fields_param
-  params.fetch(:{path}_fields, '').to_s
+  params.permit(:{path}_fields).fetch(:{path}_fields, '').to_s
 end
 ```
 
-### Name every inline collection
-
-A literal array or hash used inside a method body gets a name — a local, or a
-constant when it does not depend on the request:
-
-```ruby
-# Not: V1::FIELDS.group_by { |f| %w[Threat Impact].include?(…) ? … }
-input_fields = %w[Threat Threat.Value Vulnerability Vulnerability.Value Impact Impact.Value]
-
-grouped_fields = V1::FIELDS.group_by do |field|
-  name = field.delete_prefix('{PREFIX}.')
-
-  if input_fields.include?(name)
-    'Inputs'
-  elsif V1::FACTORS.any? { |factor| factor[:field] == name }
-    'Capability Factors'
-  else
-    'Calculated Results'
-  end
-end
-```
-
-The name is what tells the next reader what the literal *is*; without it the
-condition has to be reverse-engineered from its contents.
+Both are verified against actionpack: `permit(fields: [], values: FIELDS)`
+drops unknown `values` keys, and `.to_h` with a block replaces the older
+`Hash[*pairs.flatten.map(&:strip)]` idiom.
 
 ## Views
 
 **Two entry views, shared content partials.** `base/index.html.erb` and
 `issues/edit.html.erb` each lay themselves out and render the same
-`base/_*.html.erb` partials. Do not add a wrapper partial that branches on a
-layout flag — the existing calculators do not, and the entry views are where
-a layout belongs.
+`base/_*.html.erb` partials. No wrapper partial that branches on a layout flag.
+Content partials read controller ivars directly. Both entry views carry the
+`data-behavior`, `data-{path}-config` and `data-{path}-fields-url` attributes.
 
-Content partials read controller ivars directly (as DREAD's read
-`@dread_vector`). No locals plumbing.
-
-Both entry views carry the `data-behavior`, `data-{path}-config` and
-`data-{path}-fields-url` attributes on the calculator root, so the JS gets the
-same definitions and the same endpoint at either level.
-
-### ERB indentation
-
-Nested ERB blocks indent one level per block, exactly like the HTML around
-them. It is easy to land on two levels at once when an `<% … do %>` and a tag
-open on the same line — read the partial back and check each `<% end %>` sits
-at the indentation of its opener.
-
-### The standalone layout needs Hera's stylesheet
-
-The add-on's own layout links two stylesheets, `hera` first and the
-calculator's own second, so the standalone page picks up Hera's theme custom
-properties and Bootstrap before the calculator's rules override anything:
+**The standalone layout links Hera's stylesheet first**, so the standalone page
+gets Hera's theme properties and Bootstrap before the calculator's rules:
 
 ```erb
 <%= stylesheet_link_tag 'hera', media: 'all', 'data-turbo-track': 'reload' %>
 <%= stylesheet_link_tag 'dradis/plugins/calculators/{path}/base', media: 'all', 'data-turbo-track': 'reload' %>
 ```
 
-Without the `hera` link the standalone page renders unstyled where the issue
-tab looks correct, because in-app the host already loaded it.
+**The two levels have very different widths.** The standalone page is a bare
+`.container`; the issue page sits between the main sidebar (`14rem`) and the
+issue sidebar (`14rem × 1.25`). Bootstrap's `col-lg-*` and any media query key
+off the *viewport*, so a split that reads well standalone fires on the issue
+page with far less room. Two consequences:
 
-### The two levels have very different widths
+- On the issue view, use nav-pills (inputs / result) as CVSS and DREAD do, with
+  the live score in the Result pill:
 
-The standalone page uses the add-on's own layout: a bare `.container`, no
-sidebars. The issue page renders inside `layouts/hera`, between the main
-sidebar (`14rem`) and the secondary issue sidebar (`14rem × 1.25`) — roughly
-500px of chrome before padding.
+  ```erb
+  <ul class="nav nav-pills w-100" id="{path}-tabs">
+    <li class="nav-item"><a href="#{path}-edit-inputs" data-bs-toggle="pill" class="nav-link active">Inputs</a></li>
+    <li class="nav-item pull-right">
+      <a href="#{path}-edit-result" data-bs-toggle="pill" class="nav-link">
+        Result: <span data-behavior="{path}-score">0</span>
+      </a>
+    </li>
+  </ul>
+  ```
 
-**Bootstrap's `col-lg-*` keys off viewport width, not container width**, so a
-side-by-side split that reads well standalone will fire on the issue page
-with far less room than it assumes. This is why CVSS and DREAD use nav-pills
-on the issue view and side-by-side on the instance page. Follow them:
+  (`pull-right` is inert in Bootstrap 5's flex `.nav`; match the siblings
+  anyway, and fix it across all calculators at once.)
+- Multi-column groups inside a pane use `display: flex; flex-wrap: wrap` with a
+  `min-width` per item, not a fixed `grid-template-columns` — a fixed grid
+  overflows the issue tab when both sidebars are open (AIVSS-SSVC `c33692a`).
 
-```erb
-<ul class="nav nav-pills w-100" id="{path}-tabs">
-  <li class="nav-item"><a href="#{path}-edit-inputs" data-bs-toggle="pill" class="nav-link active">Inputs</a></li>
-  <li class="nav-item pull-right">
-    <a href="#{path}-edit-result" data-bs-toggle="pill" class="nav-link">
-      Result: <span data-behavior="{path}-score">0</span>
-    </a>
-  </li>
-</ul>
-```
-
-Keep the live score in the pill and put only the field output behind the tab
-— that is what CVSS and DREAD do.
-
-Note `pull-right` is `float: right`, which is inert inside Bootstrap 5's flex
-`.nav`. The existing calculators' Result pills therefore do not actually
-right-align. Match them anyway; a fix to `pull-right` should land on all the
-calculators at once rather than one diverging.
-
-### Selects
-
-Add `data-combobox-config="no-combobox"` to every `<select>`, or Dradis's
-combobox module will rewrite them on the issue page.
+**Selects** get `data-combobox-config="no-combobox"`, or Dradis's combobox
+module rewrites them on the issue page.
 
 ### The field picker (optional)
 
-CVSS, DREAD and MITRE write their fields unconditionally, and for a handful of
-fields that is the right call — a picker is UI the user has to operate for no
-gain. It earns its place when a model produces enough fields that writing all
-of them would bury the issue.
+CVSS, DREAD and MITRE write all their fields, and for a handful that is right.
+A picker earns its place only when writing everything would bury the issue —
+as a rule of thumb, more than about a dozen fields. If you add one:
 
-If you do add one, this is the shape: switches for which `{PREFIX}.*` fields
-get written, grouped so a long list stays readable (inputs, intermediate
-values, calculated results):
+- Switches for which `{PREFIX}.*` fields get written, grouped (calculated
+  results, inputs, intermediate values), with select all / none past a dozen.
+- `VECTOR_FIELD` always on and disabled (see "Restoring saved state").
+- The switches feed the `fields:` list posted to `base#fields`.
+- Initial state from the issue's existing `{PREFIX}.*` fields, else from
+  `Engine.settings.fields`.
+- On `update`, switched-off fields are `delete_field`ed.
+- The textarea becomes `class: 'd-none'`.
 
 ```erb
 <div class="form-check form-switch mb-2">
@@ -767,25 +754,12 @@ values, calculated results):
          data-field-name="<%= field %>"
          <%= 'checked' if @enabled_fields.include?(field) %>>
   <label class="form-check-label" for="{path}-field-<%= field.parameterize %>"><%= field %></label>
-  <p class="small mb-0" data-behavior="{path}-field-value" data-field-name="<%= field %>"></p>
 </div>
 ```
 
-- The switches feed the `fields:` list posted to `base#fields`, so toggling one
-  re-renders the output server-side rather than editing the textarea client-side.
-- The initial state comes from the issue's existing `{PREFIX}.*` fields when
-  it has any, and from an `addon_settings` default when it does not, which puts
-  the default for new scores in the Configuration Manager.
-- On `update`, fields the user switched off are `delete_field`ed rather than
-  left behind at their old values. This is the part that is easy to forget and
-  produces wrong data when you do.
-- "Select all" / "Deselect all" links, once the list runs past a dozen.
-- The textarea becomes `class: 'd-none'` — the switches are the UI.
-
 ### View hooks
 
-Two partials, both discovered automatically by `render_view_hooks` — nothing
-in dradis-ce needs editing:
+Discovered automatically by `render_view_hooks` — nothing in the host changes:
 
 ```erb
 <%# _tools_menu.html.erb %>
@@ -802,37 +776,19 @@ in dradis-ce needs editing:
 </li>
 ```
 
-### Other available hooks
-
-`render_view_hooks` is used in more places than the two a calculator normally
-fills. Any of these can be filled by adding a matching partial — no change to
-dradis-ce:
-
-| Hook | Rendered in | Use for a calculator |
-|---|---|---|
-| `tools_menu` | Main nav | The instance-level link (all three use this) |
-| `issues/show-tabs` | Issue view | The calculator tab (all three use this) |
-| `issues/widget` | Issue sidebar | Show the current score without opening the calculator |
-| `issues/show-content` | Issue body | Render the score inline on the issue |
-| `issues/edit-content` | Issue editor | Surface fields while editing |
-| `export/index-tabs` | Export page | Only with `feature: :export` |
-
-The sidebar widget is worth considering: it puts the score in front of a reader
-who is not going to open the calculator, which is most readers.
+Other hooks exist (`issues/widget` for the issue sidebar, `issues/show-content`,
+`issues/edit-content`). None of the shipped calculators use them; mention the
+sidebar widget to the user as an option rather than building it unasked.
 
 ## JavaScript
 
 Vanilla ES6 in a `turbo:load` listener, wired by `data-behavior` attributes.
-If you vendored an upstream implementation, this file is a thin wrapper: read
-the form, call upstream, render the result, and hold no scoring logic of its
-own. If you transcribed instead, port the source's logic verbatim — same
-branch order, same comparisons, same rounding — and mark it as ported so
-nobody "improves" it later.
+Vendored: a thin wrapper. Transcribed: the source's logic verbatim — same
+branch order, same comparisons, same rounding — marked as ported.
 
-**No free-floating constants.** Everything the calculator needs lives on the
-instance, read in the constructor — either off `FRONTEND_CONFIG` or off the
-elements' own `data-` attributes. Nothing sits at module scope between the
-`turbo:load` listener and the class:
+Everything the calculator needs lives on the instance, read in the constructor
+from `FRONTEND_CONFIG` or the elements' `data-` attributes. Nothing at module
+scope:
 
 ```js
 document.addEventListener('turbo:load', () => {
@@ -848,6 +804,8 @@ document.addEventListener('turbo:load', () => {
       this.badgeClass = config.badgeClass;
 
       this.fieldsUrl = root.dataset.{path}FieldsUrl;
+      this.fieldSwitches = Array.from(root.querySelectorAll('[data-behavior~={path}-field-switch]'));
+      this.fieldRequestId = 0;
       this.values = {};
     }
 
@@ -858,12 +816,7 @@ document.addEventListener('turbo:load', () => {
 });
 ```
 
-**Ask the server for the field output.** The JS collects the computed values
-into `this.values` and posts them; it never assembles `#[Field]#` blocks or
-re-implements `FieldParser`'s regex:
-
-The `fieldSwitches` branch below is only needed if you added the optional field
-picker; without one, the calculator posts everything it computed.
+Ask the server for the field output:
 
 ```js
 async writeResult() {
@@ -900,159 +853,239 @@ async writeResult() {
 }
 ```
 
-Three things that are easy to leave out and all of them matter:
+`credentials` and the CSRF token are required or Rails rejects the POST.
 
-- **`credentials: 'same-origin'` and the CSRF token.** Rails rejects the POST
-  without them.
-- **Guard against out-of-order responses.** Every click fires a request; a
-  slow earlier one must not overwrite a fast later one.
-- **Handle the failure branch.** A `fetch` that resolves non-2xx is not an
-  exception — check `response.ok` and say something on the `else`. Silently
-  leaving stale output in the textarea is the worst outcome here.
+Update by behavior with `querySelectorAll`: the issue view echoes the score in
+the Result pill as well as the results panel.
 
-**`if`/`else` over the ternary** for anything that is not a trivial one-line
-expression. A ternary spanning lines, or one whose branches are themselves
-expressions, reads worse than the four-line `if`.
+### Asset manifests and styles
 
-**Use `querySelectorAll` when updating by behavior**, not `querySelector`:
-the issue view echoes the score in the Result pill as well as the results
-panel, and a single-element update silently leaves one of them stale.
-
-### Asset manifests
-
-`base.js` (standalone page) requires jquery3/popper/bootstrap plus the
-calculator; `manifests/hera.js` (in-app) requires only the calculator, since
-Dradis already loads the rest. Same split for the stylesheets: put the rules
-in `_{path}.scss` and have both manifests import it.
+`base.js` (standalone) requires jquery3/popper/bootstrap plus the calculator;
+`manifests/hera.js` (in-app) requires only the calculator. Same split for the
+stylesheets: rules in `_{path}.scss`, imported by both manifests.
 
 Style against Hera's theme custom properties — `--primary-bg`,
-`--primary-bg-subtle`, `--border-color`, `--text-default`, `--text-muted` —
-so the calculator follows light and dark themes.
+`--primary-bg-subtle`, `--border-color`, `--text-default`, `--text-muted` — so
+the calculator follows light and dark themes.
+
+## Conventions
+
+The review conventions the dradis maintainers apply. Rubocop (see "Lint")
+enforces the ones marked **(rubocop)**; the rest are on you.
+
+**Ruby**
+
+- No alignment padding — hashes, constants, routes. **(rubocop:
+  `Layout/ExtraSpacing` with `AllowForAlignment: false`, `Layout/HashAlignment`)**
+- Single-quoted strings unless interpolating. **(rubocop)**
+- `{ }` for single-line blocks, `do … end` for multi-line. **(rubocop)**
+- Multiline hashes once an entry has more than about three keys, one key per
+  line; don't mix styles within one constant.
+- Strong params for every `params` read.
+- Name every inline collection: a literal array in a conditional becomes a
+  local or constant (`input_fields`), because the name says what it is.
+- Field names and the prefix come from `V1`, never as literals elsewhere.
+- Prefer `to_h { }`, `each_with_object` and `index_with` over building a hash
+  by mutation in an `each`.
+
+**JavaScript**
+
+- Constants inside the class, read in the constructor.
+- `if`/`else` rather than a multi-line ternary.
+- Handle the non-`ok` branch of every `fetch`.
+- Guard against out-of-order responses.
+
+**Views**
+
+- ERB nests one level per block; check each `<% end %>` against its opener,
+  especially where an `<% … do %>` and a tag open on the same line.
+
+**Docs**
+
+- The README says what the defaults are and that they match the reference; it
+  never invites users to edit the model owner's values in the gem source.
+- The README records the source URL, and for vendored code its version.
+
+## Specs
+
+The gem ships `spec/models/dradis/plugins/calculators/{path}/v1_spec.rb`. The
+older calculators ship none, but the add-on CI planned for dradis-ce runs each
+add-on's `spec/` from the host — and a calculator with nothing to run proves
+nothing.
+
+The spec uses the host's `rails_helper`, the same as other host-mode add-ons:
+
+```ruby
+require 'rails_helper'
+
+describe Dradis::Plugins::Calculators::{Module}::V1 do
+  describe '.field_output' do
+    it 'writes the requested fields in FIELDS order' do
+      fields = described_class::FIELDS.last(2).reverse
+      output = described_class.field_output({}, fields: fields)
+
+      expect(output.scan(/#\[(.+?)\]#/).flatten).to eq(fields.reverse)
+    end
+
+    it 'drops field names outside FIELDS' do
+      expect(described_class.field_output({}, fields: ['Evil.Field'])).to eq('')
+    end
+  end
+
+  describe '.selection_from_fields' do
+    it 'restores a selection from its own saved output' do
+      # every input set to a non-default option, saved, parsed back
+    end
+
+    it 'falls back to DEFAULTS on a malformed vector' do
+      expect(described_class.selection_from_fields(described_class::VECTOR_FIELD => 'garbage'))
+        .to eq(described_class::DEFAULTS)
+    end
+  end
+end
+```
+
+Cover at least:
+
+- **Constants** — `V1`'s values against the source. Capture what you extracted
+  from the source to `spec/fixtures/reference.json` during the port and assert
+  against it, so a later edit to `V1` that diverges fails. (Vendored tables
+  need no constants spec; there is nothing transcribed.)
+- **Round-trip** — every input at a non-default value, through `field_output`,
+  through `FieldParser::FIELDS_REGEX`, through `selection_from_fields`, equal to
+  the start.
+- **Fallback** — blank, malformed and partial values restore to `DEFAULTS`
+  per field instead of raising.
+- **`field_output`** — order, filtering, `N/A` for blanks, vector always present
+  if there is a picker.
+- **"Not defined"** values survive the round-trip.
+
+Scoring that lives in the JS is covered by the port verification below, not by
+these specs; say so in the report.
+
+Run from the host:
+
+```bash
+cd ../dradis-ce
+bundle exec rspec ../dradis-calculator_{name}/spec
+```
+
+rspec resolves `rails_helper` against the cwd, so it loads the host's.
 
 ## Verifying the port
 
-Match the technique to what the source affords. State which you used.
+Match the technique to what the source affords, and state which you used.
 
-### Tier 1 — differential against a runnable reference
-
-The strongest evidence, available whenever the source ships something
-runnable. Run the reference and your build over the same inputs and compare
-every output. For a self-contained reference page, jsdom can host both:
+**Tier 1 — differential against a runnable reference.** Run the reference and
+your build over the same inputs and compare every output. jsdom hosts both:
 
 ```js
 const { JSDOM } = require('jsdom');
 
-// Reference: the real page, its own scripts running.
 const ref = new JSDOM(fs.readFileSync('reference.html', 'utf8'), { runScripts: 'dangerously' });
 
-// Under test: your rendered markup + your real calculator.js.
 const dom = new JSDOM(fs.readFileSync('fixture.html', 'utf8'), { runScripts: 'outside-only' });
 dom.window.eval(fs.readFileSync('.../{path}_calculator.js', 'utf8'));
 dom.window.document.dispatchEvent(new dom.window.Event('turbo:load'));
 ```
 
-If the reference is a library rather than a page, require it directly and skip
-the DOM on that side. If it is a hosted service, capture its responses once to
-a fixture rather than calling it per assertion.
+Render the fixture from the **real ERB** so the views are covered; plain ERB
+does not auto-escape like Rails, so emulate that. Stub `fetch` for the `fields`
+endpoint with `V1.field_output` output. If the reference is a library, require
+it directly; if it is a hosted service, capture responses once to a fixture.
 
-Render your fixture from the **real ERB** rather than hand-written HTML, so
-the views are covered too. Plain ERB does not auto-escape like Rails does, so
-emulate that or attributes containing quotes will not match what Dradis
-serves.
+**Tier 2 — published test vectors.** Encode each as a case. Samples, not
+coverage.
 
-### Tier 2 — published test vectors
+**Tier 3 — hand-derived cases.** Every branch and both sides of every
+threshold, with the derivation recorded next to each expected value. Say
+plainly that no oracle existed.
 
-Many specs publish vectors or worked examples. Encode each as a case and
-assert your build reproduces it exactly. Vectors are samples rather than
-coverage, so pair them with the structural checks below.
+**Structural checks, at every tier:**
 
-### Tier 3 — hand-derived cases
-
-When the source is prose or a table only, work cases through the model by
-hand: every branch, and both sides of every threshold. Record the derivation
-next to each expected value so a reviewer can check your arithmetic rather
-than trusting it. Say plainly that no oracle existed.
-
-### Tier 4 — user confirmation
-
-For a model the user owns, there is no external oracle: their sign-off on the
-model you restated back to them is the specification. Encode that restatement
-as the test — every axis, band and cell as explicit cases — so the thing they
-approved is the thing that is asserted, and a later change to the model shows
-up as a failing case rather than a quiet drift.
-
-### Structural checks, at every tier
-
-These are cheap and catch bugs the tiers above miss:
-
-- **Constants check** — parse the source and assert programmatically that the
-  values in `V1` match: option values, labels, thresholds, defaults. Catches a
-  mistyped lookup cell that no formula test will.
-- **Boundary enumeration** — for each derived quantity, enumerate every
-  distinct value it can reach rather than sampling. Averages and lookups have
-  far fewer distinct outputs than inputs, so this is usually cheap and it is
-  the only way to guarantee no threshold boundary is skipped.
+- **Boundary enumeration** — enumerate every distinct value each derived
+  quantity can reach rather than sampling; it is the only way to guarantee no
+  threshold is skipped.
 - **Random fuzz** — a few thousand inputs across the whole space.
-- **Round-trip** — drive the calculator, take its saved field output, feed it
-  back through state restoration, assert the form state is identical. Assert
-  malformed and partial input falls back rather than raising.
-- **Both layouts** — point the harness at the instance page and the issue view
-  and assert they agree; the layouts differ, the numbers must not.
-- **Every user-visible string**, and every element that echoes a value, not
-  just the headline number.
+- **Both layouts** — the instance page and the issue view agree.
+- **Every user-visible string** and every element that echoes a value.
 
-For a dataset-backed calculator there is no arithmetic to diff. Check instead
-that every taxonomy node resolves, that IDs and names are consistent with
-upstream, that the selects' dependent levels populate, and that the asset
-parses and is the shape the JS expects.
+For a dataset-backed calculator: every taxonomy node resolves, IDs and names
+match upstream, dependent selects populate, the asset parses into the shape
+the JS expects.
+
+The harness lives outside the gem (scratch directory); only the Ruby specs
+ship.
+
+## Lint
+
+Run the host's rubocop config over the whole gem — every file is new, so the
+host's diff-based `bin/rubocop-ci` adds nothing:
+
+```bash
+cd dradis-calculator_{name}
+BUNDLE_GEMFILE=../dradis-ce/Gemfile bundle exec rubocop -c ../dradis-ce/.rubocop.yml --force-exclusion
+```
+
+Zero offenses before you report. If rubocop is not in the host bundle, say the
+lint did not run rather than skipping it silently.
+
+Also: `node --check` on every JS file, and grep the gem for the names of
+any calculator you read, and their field prefixes.
+
+## Smoke test in the host
+
+The specs and the harness never boot the engine. This does, and it is the only
+thing that catches inflection, routing, asset and view-hook mistakes.
+
+1. Point the host at the gem. `Gemfile.plugins` is gitignored and the new gem
+   is not yet in the host `Gemfile`, so append there:
+
+   ```ruby
+   gem 'dradis-calculator_{name}', path: '../dradis-calculator_{name}'
+   ```
+
+2. From the host:
+
+   ```bash
+   bundle install
+   bin/rails zeitwerk:check
+   bin/rails routes -g {path}
+   bin/rails runner 'p Dradis::Plugins::Calculators::{Module}::Engine.enabled?'
+   bundle exec rspec ../dradis-calculator_{name}/spec
+   ```
+
+   `zeitwerk:check` must pass; `routes` must list `calculators_{path}`,
+   `calculators_{path}_fields` and `{path}_project_issue`.
+
+3. Start the server and, with a browser (the `run` skill, or Claude in Chrome
+   if available):
+   - open `/calculators/{path}` — styled, every control works, the field
+     output updates on each change;
+   - open an issue, use the **{NAME}** tab, save, and assert the fields landed
+     on the issue;
+   - reopen the tab and assert every control is in the saved state;
+   - the Tools menu lists the calculator;
+   - the browser console has no errors.
+
+If you cannot start the server, list the step-3 checks for the user and say
+they are unrun.
+
+## Out of scope
+
+Not supported by this skill without a design conversation first:
+
+- **Decision trees** (SSVC proper, triage trees). No shipped calculator has
+  this shape, so there is no house UI. If asked, propose a design and get it
+  agreed before building; the path through the tree must be an output field.
+- **A model with no source** — the user's internal matrix or a description. Ask
+  them to restate it as a table, confirm every axis, band and cell back to
+  them, and treat that confirmed table as a Tier 3 source.
 
 ## Gotchas
 
-- **`git ls-files` in the gemspec** — the gemspec computes `spec.files` from
-  it, so an un-`init`ed folder builds an empty gem. `git init` the add-on.
 - **Rounding is part of the model.** Match the source's arithmetic exactly.
-- **Don't copy sibling bugs, or their client-side field building.** The older
-  calculators assemble `#[Field]#` output in JavaScript, re-implementing
-  dradis-ce's `FieldParser` regex — MITRE even defines `escapeRegex` and then
-  forgets to apply it. Render field output server-side instead. CVSS likewise
-  carries a rhetorical comment about inheriting from a "no-frills controller"
-  that is wrong on `IssuesController`. Port the patterns, not the defects.
-- **`spec.authors`** — the clone leaves the original author's name on code
-  they did not write. Set `['Dradis Team']`.
-- **Strip the clone's boilerplate cruft.** The sibling's gemspec carries
-  commented-out dependency notes for Rails versions that no longer matter, and
-  its `.gitignore` may start with a blank line. Delete both; a new gem should
-  not ship a stale comment explaining a decision it never made.
-- **Don't tell users to edit the model's defaults.** The README documents what
-  the defaults *are* and that they match the reference calculator. Inviting
-  users to change hardcoded official values in the gem source is not a
-  supported workflow, and it puts their install out of agreement with the
-  model owner.
-- **No calculator ships tests**, and dradis-ce's suite does not cover them
-  either — not for want of something to test against (CVSS has FIRST's own
-  implementation, MITRE has the ATT&CK feeds, DREAD's formulas are fixed).
-  Verify during the port regardless; shipping the harness as specs is a
-  departure worth raising with the user rather than assuming.
-- **A model with no oracle is still portable**, just less provable. Say which
-  verification tier you reached instead of implying Tier 1 coverage.
-- **Licence-check anything you vendor.** Redistribution in a GPL-2 gem is not
-  automatic.
-
-## Review conventions
-
-The dradis reviewers apply these consistently; getting them right the first
-time is cheaper than a round trip.
-
-| Convention | Why |
-|---|---|
-| No alignment padding anywhere — hashes, constants, routes | Realignment diffs bury the real change |
-| Multiline hash per entry once it has several keys | Diffs stay one-key-wide |
-| Strong params for every `params[...]` read | The action stays free of parameter handling; the field list is the whitelist |
-| Name inline arrays/hashes (`input_fields`, not a literal in a conditional) | The name is the documentation |
-| One definition, in `V1`, serialized to the browser — values, not control flow | Two copies of a lookup table means one goes stale |
-| Server renders field output; JS posts values and swaps in the response | No duplicated `FieldParser` regex on the client |
-| JS constants inside the class, read in the constructor | Nothing floats at module scope |
-| `if`/`else` over multi-line ternaries | Reads as branching, because it is |
-| Handle the non-`ok` branch of every `fetch` | A silent stale textarea is the worst failure |
-| Register inflections once, in `lib/dradis-calculator_{name}.rb` | `isolate_namespace` needs them at require time; the engine is too late |
-| ERB nests one level per block | Two-level jumps hide a mis-closed block |
+- **Don't copy sibling defects.** MITRE defines `escapeRegex` and never applies
+  it; CVSS has a comment about a "no-frills controller" that is wrong on
+  `IssuesController`. Port the patterns, not the bugs.
+- **`spec.authors`** is `['Dradis Team']`.
