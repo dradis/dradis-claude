@@ -73,6 +73,26 @@ The skill will:
 
 **Produces:** A complete kit under `lib/tasks/templates/{kit}/` ready for the Setup wizard.
 
+### `/dradis-core:calculator`
+
+Create a Dradis risk calculator add-on (a `dradis-calculator_*` gem) from a reference calculator or published scoring model.
+
+**Usage:**
+
+```
+/dradis-core:calculator https://aivss.owasp.org/ssvc.html aivss-ssvc
+```
+
+The skill will:
+1. Classify the source — vendoring the model owner's own implementation where one exists, transcribing it where one doesn't
+2. Classify the model's shape (discrete metrics, numeric scales, taxonomy, lookup table, multi-version) to pick the UI
+3. Scaffold the gem from the AIVSS-SSVC boilerplate and build it, available at both the instance level and on each issue
+4. Verify at the strongest tier the source allows
+5. Lint with Dradis CE's rubocop config
+6. Report the verification tier and the defaults taken, with instructions for installing and testing the calculator on a Dradis CE instance
+
+**Produces:** A new `dradis-calculator_{name}/` sibling directory that is verified against the source, plus Dradis CE install and test instructions.
+
 
 ## Samples
 
