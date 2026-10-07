@@ -19,7 +19,7 @@ dradis-calculator_{name}/
 ├── dradis-calculator_{name}.gemspec
 ├── CHANGELOG.md  CHANGELOG.template  README.md  LICENSE  CONTRIBUTING.md
 ├── Gemfile  Rakefile  .gitignore
-├── .github/pull_request_template.md   # no issue_template.md
+├── .github/pull_request_template.md
 ├── config/
 │   └── routes.rb
 ├── lib/
@@ -65,21 +65,6 @@ it. Then:
 - **Version** — set `gem_version.rb` as below.
 - **`CHANGELOG.md`** — replace the body with the new gem's single entry.
 - **`README.md`** — written fresh (see "Conventions"), not substituted.
-- **`gem_version.rb`** — the copied `join(".")` is double-quoted; make it
-  `join('.')`, or the lint step fails on it.
-
-Do not copy boilerplate from CVSS, DREAD or MITRE. They still carry what the
-AIVSS-SSVC review removed:
-
-| Rejected in review | Still in |
-|---|---|
-| `.github/issue_template.md` — Dradis keeps one tracker, on dradis-ce | CVSS, DREAD, MITRE |
-| CONTRIBUTING link to `dradis/dradisframework` rather than `dradis-ce` | CVSS, DREAD, MITRE |
-| Commented `dradis_core` / `dradisframework` lines in `Gemfile` | DREAD, MITRE |
-| `# s.add_dependency 'rails', '~> 4.1.1'` note in the gemspec | DREAD, MITRE |
-| Client-side `#[Field]#` building in JS | CVSS, DREAD, MITRE |
-
-Fixing them in those repos is outside this skill.
 
 ### Version
 

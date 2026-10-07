@@ -96,7 +96,7 @@ the JS. Both are in reference.md "The model (`V1`)".
 for app code: it is the only calculator with the server-rendered field output,
 the single `V1` config blob and strong params throughout. Read it whatever
 the shape. Read CVSS as well for vendoring or multi-version, and MITRE for an
-external dataset. Copy boilerplate only from AIVSS-SSVC (reference.md
+external dataset. Copy boilerplate from AIVSS-SSVC (reference.md
 "Boilerplate").
 
 ## Step 3 — Design the output fields
@@ -213,7 +213,7 @@ Each item points at the reference.md section that defines it.
 - [ ] Any external dataset ships as an asset with the script that made it
 
 **Boilerplate** ("Boilerplate")
-- [ ] Copied from AIVSS-SSVC with names substituted; nothing from CVSS, DREAD or MITRE
+- [ ] Copied from AIVSS-SSVC with names substituted
 - [ ] `gem_version.rb` and the CHANGELOG header carry the same, next-release version
 - [ ] No strings left from any calculator you read
 
